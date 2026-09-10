@@ -1,0 +1,10 @@
+{
+  "name": "Remix SAMARAI PARK - Sistem Tiket \u0026 Member Kolam Renang",
+  "description": "Aplikasi pembayaran tiket masuk member kolam renang SAMARAI PARK dengan QR code terenkripsi, potongan saldo real-time, top-up bank \u0026 e-wallet, dasbor admin, pendaftaran kursus renang, dan grup chat peserta.",
+  "requestFramePermissions": [
+    "camera"
+  ],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}
