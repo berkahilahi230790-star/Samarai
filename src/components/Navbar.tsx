@@ -1,4 +1,5 @@
-import React, { useState } from 'react';
+import React, { useState, useRef, useEffect } from 'react';
+import { createPortal } from 'react-dom';
 import {
   Bell,
   Waves,
@@ -12,6 +13,7 @@ import {
   Trash2,
   Lock,
   GraduationCap,
+  X,
 } from 'lucide-react';
 import { useApp } from '../context/AppContext';
 import { UserRole } from '../types';
@@ -39,6 +41,91 @@ export const Navbar: React.FC<NavbarProps> = ({ currentTab, setCurrentTab, onOpe
 
   const [showNotifications, setShowNotifications] = useState(false);
   const [showUserDropdown, setShowUserDropdown] = useState(false);
+  const [isMobile, setIsMobile] = useState(() => typeof window !== 'undefined' ? window.innerWidth < 640 : false);
+
+  const notificationRef = useRef<HTMLDivElement>(null);
+  const notificationModalRef = useRef<HTMLDivElement>(null);
+  const userDropdownRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    const handleResize = () => {
+      setIsMobile(window.innerWidth < 640);
+    };
+    window.addEventListener('resize', handleResize);
+    return () => window.removeEventListener('resize', handleResize);
+  }, []);
+
+  // Close notifications dropdown when clicking or touching outside, or pressing Escape
+  useEffect(() => {
+    if (!showNotifications) return;
+
+    const handleClickOutside = (event: MouseEvent | TouchEvent) => {
+      const target = event.target as Node;
+      if (isMobile) {
+        if (
+          notificationModalRef.current &&
+          !notificationModalRef.current.contains(target) &&
+          notificationRef.current &&
+          !notificationRef.current.contains(target)
+        ) {
+          setShowNotifications(false);
+        }
+      } else {
+        if (
+          notificationRef.current &&
+          !notificationRef.current.contains(target)
+        ) {
+          setShowNotifications(false);
+        }
+      }
+    };
+
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        setShowNotifications(false);
+      }
+    };
+
+    document.addEventListener('mousedown', handleClickOutside);
+    document.addEventListener('touchstart', handleClickOutside);
+    document.addEventListener('keydown', handleKeyDown);
+
+    return () => {
+      document.removeEventListener('mousedown', handleClickOutside);
+      document.removeEventListener('touchstart', handleClickOutside);
+      document.removeEventListener('keydown', handleKeyDown);
+    };
+  }, [showNotifications, isMobile]);
+
+  // Close user dropdown when clicking or touching outside, or pressing Escape
+  useEffect(() => {
+    if (!showUserDropdown) return;
+
+    const handleClickOutside = (event: MouseEvent | TouchEvent) => {
+      if (
+        userDropdownRef.current &&
+        !userDropdownRef.current.contains(event.target as Node)
+      ) {
+        setShowUserDropdown(false);
+      }
+    };
+
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        setShowUserDropdown(false);
+      }
+    };
+
+    document.addEventListener('mousedown', handleClickOutside);
+    document.addEventListener('touchstart', handleClickOutside);
+    document.addEventListener('keydown', handleKeyDown);
+
+    return () => {
+      document.removeEventListener('mousedown', handleClickOutside);
+      document.removeEventListener('touchstart', handleClickOutside);
+      document.removeEventListener('keydown', handleKeyDown);
+    };
+  }, [showUserDropdown]);
 
   const unreadCount = notifications.filter(n => !n.isRead).length;
 
@@ -152,7 +239,7 @@ export const Navbar: React.FC<NavbarProps> = ({ currentTab, setCurrentTab, onOpe
             </div>
 
             {/* Notification Bell with Badge */}
-            <div className="relative">
+            <div ref={notificationRef} className="relative">
               <button
                 onClick={() => setShowNotifications(!showNotifications)}
                 className="relative p-2 rounded-xl text-slate-500 hover:text-slate-900 hover:bg-slate-100 transition-colors"
@@ -166,14 +253,14 @@ export const Navbar: React.FC<NavbarProps> = ({ currentTab, setCurrentTab, onOpe
                 )}
               </button>
 
-              {/* Notification Dropdown Drawer */}
-              {showNotifications && (
+              {/* Notification Content Helper */}
+              {showNotifications && !isMobile && (
                 <div className="absolute right-0 mt-2 w-80 sm:w-96 bg-white rounded-2xl shadow-xl border border-slate-100 overflow-hidden z-50 animate-fade-in">
                   <div className="p-3.5 bg-slate-50 border-b border-slate-100 flex items-center justify-between">
                     <div className="flex items-center gap-2">
                       <Bell className="w-4 h-4 text-blue-600" />
                       <h4 className="text-xs font-black text-slate-800 tracking-tight">Notifikasi Real-Time</h4>
-                      <span className="bg-blue-50 text-blue-700 text-[10px] font-bold px-1.5 py-0.2 rounded-full">
+                      <span className="bg-blue-50 text-blue-700 text-[10px] font-bold px-1.5 py-0.5 rounded-full">
                         {notifications.length}
                       </span>
                     </div>
@@ -228,11 +315,102 @@ export const Navbar: React.FC<NavbarProps> = ({ currentTab, setCurrentTab, onOpe
                   </div>
                 </div>
               )}
+
+              {/* Mobile Centered Notification Modal */}
+              {showNotifications && isMobile && typeof document !== 'undefined' && createPortal(
+                <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-xs animate-fade-in no-print">
+                  {/* Backdrop Click Outside */}
+                  <div
+                    className="absolute inset-0"
+                    onClick={() => setShowNotifications(false)}
+                    aria-label="Tutup Notifikasi"
+                  />
+
+                  {/* Centered Modal Window */}
+                  <div
+                    ref={notificationModalRef}
+                    className="relative w-full max-w-sm bg-white rounded-3xl shadow-2xl border border-slate-100 overflow-hidden z-10 animate-fade-in"
+                  >
+                    <div className="p-4 bg-slate-50 border-b border-slate-100 flex items-center justify-between">
+                      <div className="flex items-center gap-2">
+                        <div className="w-8 h-8 rounded-xl bg-blue-100 text-blue-600 flex items-center justify-center">
+                          <Bell className="w-4 h-4" />
+                        </div>
+                        <div>
+                          <div className="flex items-center gap-1.5">
+                            <h4 className="text-xs font-black text-slate-800 tracking-tight">Notifikasi Real-Time</h4>
+                            <span className="bg-blue-100 text-blue-700 text-[10px] font-black px-1.5 py-0.5 rounded-full">
+                              {notifications.length}
+                            </span>
+                          </div>
+                          <p className="text-[10px] text-slate-400 font-medium">Pemberitahuan aktivitas sistem</p>
+                        </div>
+                      </div>
+                      <div className="flex items-center gap-1">
+                        {unreadCount > 0 && (
+                          <button
+                            onClick={() => notifications.forEach(n => markNotificationAsRead(n.id))}
+                            className="text-[11px] font-bold text-blue-600 hover:underline flex items-center gap-1 px-2 py-1 rounded-lg hover:bg-blue-50"
+                          >
+                            <CheckCheck className="w-3.5 h-3.5" />
+                            Dibaca
+                          </button>
+                        )}
+                        <button
+                          onClick={clearNotifications}
+                          className="text-slate-400 hover:text-red-500 p-1.5 rounded-lg hover:bg-slate-100"
+                          title="Bersihkan Semua"
+                        >
+                          <Trash2 className="w-3.5 h-3.5" />
+                        </button>
+                        <button
+                          onClick={() => setShowNotifications(false)}
+                          className="text-slate-400 hover:text-slate-700 p-1.5 rounded-lg hover:bg-slate-100"
+                          title="Tutup Jendela"
+                        >
+                          <X className="w-4 h-4" />
+                        </button>
+                      </div>
+                    </div>
+
+                    <div className="max-h-[60vh] overflow-y-auto divide-y divide-slate-100">
+                      {notifications.length === 0 ? (
+                        <div className="py-12 px-6 text-center text-xs text-slate-400 font-medium">
+                          Belum ada notifikasi baru.
+                        </div>
+                      ) : (
+                        notifications.map(notif => (
+                          <div
+                            key={notif.id}
+                            onClick={() => markNotificationAsRead(notif.id)}
+                            className={`p-3.5 text-left transition-colors cursor-pointer ${
+                              notif.isRead ? 'bg-white hover:bg-slate-50' : 'bg-blue-50/50 hover:bg-blue-50'
+                            }`}
+                          >
+                            <div className="flex items-start justify-between gap-2">
+                              <span className="text-xs font-bold text-slate-900 leading-tight">
+                                {notif.title}
+                              </span>
+                              <span className="text-[10px] text-slate-400 shrink-0 font-mono">
+                                {new Date(notif.timestamp).toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' })}
+                              </span>
+                            </div>
+                            <p className="text-xs text-slate-500 mt-1 leading-relaxed">
+                              {notif.message}
+                            </p>
+                          </div>
+                        ))
+                      )}
+                    </div>
+                  </div>
+                </div>,
+                document.body
+              )}
             </div>
 
             {/* User Account / Role Selector */}
             {currentUser ? (
-              <div className="relative">
+              <div ref={userDropdownRef} className="relative">
                 <button
                   onClick={() => setShowUserDropdown(!showUserDropdown)}
                   className="flex items-center gap-2 p-1.5 rounded-xl border border-slate-200/80 hover:bg-slate-50 transition-all text-left"

@@ -28,7 +28,6 @@ import {
   ScanLine,
   Sparkles,
   Image as ImageIcon,
-  ShieldCheck,
 } from 'lucide-react';
 import { useApp } from '../../context/AppContext';
 import { User, Transaction, BusinessSettings, UserRole } from '../../types';
@@ -36,8 +35,6 @@ import { exportToExcelCSV, printReportAsPDF } from '../../utils/export';
 import { PrintableReport } from './PrintableReport';
 import { generateMemberQRPayload } from '../../utils/encryption';
 import { BannerSettingsCard } from './BannerSettingsCard';
-import { EmployeeDatabaseSection } from './EmployeeDatabaseSection';
-import { CoachDatabaseSection } from './CoachDatabaseSection';
 
 export const AdminDashboard: React.FC = () => {
   const {
@@ -53,7 +50,7 @@ export const AdminDashboard: React.FC = () => {
     cancelTransaction,
   } = useApp();
 
-  const [activeTab, setActiveTab] = useState<'traffic' | 'customers' | 'employees' | 'coaches' | 'transactions' | 'reports' | 'settings'>('settings');
+  const [activeTab, setActiveTab] = useState<'traffic' | 'customers' | 'transactions' | 'reports' | 'settings'>('settings');
 
   // Customer Management state
   const [searchCustomer, setSearchCustomer] = useState('');
@@ -93,8 +90,6 @@ export const AdminDashboard: React.FC = () => {
     .reduce((sum, t) => sum + t.amount, 0);
 
   const membersCount = users.filter(u => u.role === 'member').length;
-  const employeesCount = users.filter(u => u.role === 'gate').length;
-  const coachesCount = users.filter(u => u.role === 'coach').length;
 
   // Filtered customers
   const filteredCustomers = users.filter(u => {
@@ -203,28 +198,6 @@ export const AdminDashboard: React.FC = () => {
         >
           <Users className="w-4 h-4" />
           Database Pelanggan ({membersCount})
-        </button>
-        <button
-          onClick={() => setActiveTab('employees')}
-          className={`py-3 px-4 rounded-t-2xl transition-all border-b-2 flex items-center gap-2 whitespace-nowrap ${
-            activeTab === 'employees'
-              ? 'border-blue-600 text-blue-600 bg-white font-black'
-              : 'border-transparent text-slate-400 hover:text-slate-800 font-semibold'
-          }`}
-        >
-          <ShieldCheck className="w-4 h-4" />
-          Database Karyawan ({employeesCount})
-        </button>
-        <button
-          onClick={() => setActiveTab('coaches')}
-          className={`py-3 px-4 rounded-t-2xl transition-all border-b-2 flex items-center gap-2 whitespace-nowrap ${
-            activeTab === 'coaches'
-              ? 'border-blue-600 text-blue-600 bg-white font-black'
-              : 'border-transparent text-slate-400 hover:text-slate-800 font-semibold'
-          }`}
-        >
-          <GraduationCap className="w-4 h-4" />
-          Database Guru Les ({coachesCount})
         </button>
         <button
           onClick={() => setActiveTab('transactions')}
@@ -639,16 +612,6 @@ export const AdminDashboard: React.FC = () => {
         </div>
       )}
 
-      {/* SUB-TAB: DATABASE KARYAWAN (PETUGAS GATE & LOKET) */}
-      {activeTab === 'employees' && (
-        <EmployeeDatabaseSection />
-      )}
-
-      {/* SUB-TAB: DATABASE GURU LES (INSTRUKTUR RENANG) */}
-      {activeTab === 'coaches' && (
-        <CoachDatabaseSection />
-      )}
-
       {/* SUB-TAB 3: TRANSAKSI & FITUR PEMBATALAN (VOID/REFUND) */}
       {activeTab === 'transactions' && (
         <div className="bg-white rounded-3xl p-6 border border-slate-100 shadow-sm space-y-5">
@@ -990,20 +953,20 @@ export const AdminDashboard: React.FC = () => {
                 </div>
               </div>
 
-              {/* Pengaturan Input Minimal Top Up pada Karyawan */}
+              {/* Pengaturan Input Minimal Top Up */}
               <div className="border-t border-blue-100/70 pt-3.5">
                 <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 mb-2">
                   <div>
                     <label className="block font-bold text-slate-800 text-xs">
-                      Pengaturan Input Minimal Top Up pada Karyawan (Rp)
+                      Pengaturan Input Minimal Top Up (Rp)
                     </label>
                     <p className="text-[11px] text-slate-500 font-medium mt-0.5">
-                      Batas nominal terkecil dan dasar perhitungan otomatis untuk 6 tombol pilihan nominal top up di loket pemindai gerbang karyawan.
+                      Batas nominal minimal top up saldo akun member (berlaku untuk top up mandiri member & loket kasir/gerbang).
                     </p>
                   </div>
                   <div className="text-left sm:text-right bg-white sm:bg-transparent p-2 sm:p-0 rounded-xl border sm:border-0 border-blue-100">
                     <span className="text-[10px] text-slate-400 font-bold block uppercase tracking-wider">
-                      Min. Top Up Karyawan Aktif
+                      Min. Top Up Aktif
                     </span>
                     <span className="text-base font-black text-emerald-600 tracking-tight">
                       Rp {(formSettings.minTopUpEmployee ?? 100000).toLocaleString('id-ID')}

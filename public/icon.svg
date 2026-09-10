@@ -1,0 +1,35 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512">
+  <defs>
+    <linearGradient id="blueGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#2563eb" />
+      <stop offset="100%" stop-color="#1d4ed8" />
+    </linearGradient>
+    <linearGradient id="waveGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#38bdf8" />
+      <stop offset="100%" stop-color="#0284c7" />
+    </linearGradient>
+  </defs>
+  
+  <!-- Background Rounded Rect -->
+  <rect width="512" height="512" rx="112" fill="url(#blueGrad)" />
+  
+  <!-- Outer Ring Accent -->
+  <circle cx="256" cy="256" r="190" fill="none" stroke="#ffffff" stroke-width="12" stroke-opacity="0.15" />
+  
+  <!-- Swimmer / Water Waves Silhouette -->
+  <g transform="translate(106, 126)">
+    <!-- Swimmer head -->
+    <circle cx="220" cy="50" r="28" fill="#ffffff" />
+    <!-- Swimmer arm / stroke -->
+    <path d="M 170,90 Q 210,65 250,85 T 290,110" fill="none" stroke="#ffffff" stroke-width="20" stroke-linecap="round" stroke-linejoin="round" />
+    
+    <!-- Water Wave 1 -->
+    <path d="M 20,150 Q 80,110 150,150 T 280,150" fill="none" stroke="#ffffff" stroke-width="24" stroke-linecap="round" />
+    
+    <!-- Water Wave 2 -->
+    <path d="M 0,200 Q 75,160 150,200 T 300,200" fill="none" stroke="url(#waveGrad)" stroke-width="24" stroke-linecap="round" />
+    
+    <!-- Water Wave 3 -->
+    <path d="M 30,245 Q 90,215 150,245 T 270,245" fill="none" stroke="#93c5fd" stroke-width="20" stroke-linecap="round" />
+  </g>
+</svg>

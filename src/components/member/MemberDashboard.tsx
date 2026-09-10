@@ -43,12 +43,31 @@ export const MemberDashboard: React.FC = () => {
   const [copiedText, setCopiedText] = useState<string | null>(null);
 
   // Top Up Modal state
+  const minTopUp = typeof settings.minTopUpEmployee === 'number' && settings.minTopUpEmployee > 0
+    ? settings.minTopUpEmployee
+    : 100000;
+
+  const topUpPresets = [
+    minTopUp,
+    Math.round((minTopUp * 1.25) / 1000) * 1000,
+    Math.round((minTopUp * 1.5) / 1000) * 1000,
+    minTopUp * 2,
+    Math.round((minTopUp * 2.5) / 1000) * 1000,
+    minTopUp * 3,
+  ];
+
   const [topUpMethod, setTopUpMethod] = useState<'bank' | 'ewallet'>('ewallet');
-  const [topUpAmount, setTopUpAmount] = useState<number>(100000);
+  const [topUpAmount, setTopUpAmount] = useState<number>(() => minTopUp);
   const [customAmount, setCustomAmount] = useState<string>('');
   const [selectedBank, setSelectedBank] = useState<number>(0);
   const [selectedEwallet, setSelectedEwallet] = useState<number>(0);
   const [isProcessingTopUp, setIsProcessingTopUp] = useState(false);
+
+  const handleOpenTopUpModal = () => {
+    setTopUpAmount(minTopUp);
+    setCustomAmount('');
+    setShowTopUpModal(true);
+  };
 
   // Filter transactions
   const [filterType, setFilterType] = useState<string>('all');
@@ -119,8 +138,8 @@ export const MemberDashboard: React.FC = () => {
 
   const handleExecuteTopUp = () => {
     const finalAmount = customAmount ? parseInt(customAmount, 10) : topUpAmount;
-    if (!finalAmount || finalAmount < 10000) {
-      alert('Minimal nominal top-up adalah Rp 10.000');
+    if (!finalAmount || finalAmount < minTopUp) {
+      alert(`Nominal top up minimal Rp ${minTopUp.toLocaleString('id-ID')} (berdasarkan ketentuan minimal top up dari admin).`);
       return;
     }
 
@@ -254,19 +273,23 @@ export const MemberDashboard: React.FC = () => {
 
                 <div className="pt-1 flex items-center gap-3">
                   <button
-                    onClick={() => setShowTopUpModal(true)}
-                    className="flex-1 py-2.5 px-4 rounded-xl bg-white text-blue-700 hover:bg-blue-50 font-bold text-xs shadow-sm transition-all flex items-center justify-center gap-2"
+                    onClick={handleOpenTopUpModal}
+                    className="flex-1 py-2.5 px-4 rounded-xl bg-white text-blue-700 hover:bg-blue-50 font-bold text-xs shadow-sm transition-all flex items-center justify-center gap-2 cursor-pointer"
                   >
                     <PlusCircle className="w-4 h-4 text-blue-600" />
                     Top-Up Saldo Instan
                   </button>
                   <button
                     onClick={() => setActiveSubTab('riwayat')}
-                    className="py-2.5 px-4 rounded-xl bg-white/15 hover:bg-white/20 text-white font-bold text-xs backdrop-blur-xs transition-all flex items-center gap-1.5"
+                    className="py-2.5 px-4 rounded-xl bg-white/15 hover:bg-white/20 text-white font-bold text-xs backdrop-blur-xs transition-all flex items-center gap-1.5 cursor-pointer"
                   >
                     <History className="w-4 h-4" />
                     Mutasi
                   </button>
+                </div>
+                <div className="text-[11px] text-blue-100/90 font-medium flex items-center gap-1.5">
+                  <span className="w-1.5 h-1.5 rounded-full bg-emerald-300"></span>
+                  <span>Minimal top up Rp {minTopUp.toLocaleString('id-ID')}</span>
                 </div>
               </div>
             </div>
@@ -486,10 +509,14 @@ export const MemberDashboard: React.FC = () => {
                   Isi Saldo Member
                 </span>
                 <h3 className="text-lg font-black tracking-tight">Top-Up Saldo Instan</h3>
+                <p className="text-xs font-semibold text-blue-100 mt-1 flex items-center gap-1.5">
+                  <span className="inline-block w-1.5 h-1.5 rounded-full bg-emerald-400"></span>
+                  Minimal top up Rp {minTopUp.toLocaleString('id-ID')}
+                </p>
               </div>
               <button
                 onClick={() => setShowTopUpModal(false)}
-                className="p-1 rounded-full bg-white/20 hover:bg-white/30 text-white"
+                className="p-1 rounded-full bg-white/20 hover:bg-white/30 text-white cursor-pointer"
               >
                 ✕
               </button>
@@ -502,7 +529,7 @@ export const MemberDashboard: React.FC = () => {
                 <button
                   type="button"
                   onClick={() => setTopUpMethod('ewallet')}
-                  className={`flex-1 py-2 rounded-lg text-xs font-bold transition-all flex items-center justify-center gap-1.5 ${
+                  className={`flex-1 py-2 rounded-lg text-xs font-bold transition-all flex items-center justify-center gap-1.5 cursor-pointer ${
                     topUpMethod === 'ewallet'
                       ? 'bg-blue-600 text-white shadow-sm shadow-blue-200'
                       : 'text-slate-600 hover:text-slate-900'
@@ -514,7 +541,7 @@ export const MemberDashboard: React.FC = () => {
                 <button
                   type="button"
                   onClick={() => setTopUpMethod('bank')}
-                  className={`flex-1 py-2 rounded-lg text-xs font-bold transition-all flex items-center justify-center gap-1.5 ${
+                  className={`flex-1 py-2 rounded-lg text-xs font-bold transition-all flex items-center justify-center gap-1.5 cursor-pointer ${
                     topUpMethod === 'bank'
                       ? 'bg-blue-600 text-white shadow-sm shadow-blue-200'
                       : 'text-slate-600 hover:text-slate-900'
@@ -527,9 +554,14 @@ export const MemberDashboard: React.FC = () => {
 
               {/* Nominal Picker */}
               <div>
-                <label className="block text-xs font-bold text-slate-700 mb-2">Pilih Nominal Saldo</label>
+                <div className="flex items-center justify-between mb-2">
+                  <label className="block text-xs font-bold text-slate-700">Pilih Nominal Saldo</label>
+                  <span className="text-[10px] font-bold text-blue-700 bg-blue-50 px-2 py-0.5 rounded-md border border-blue-200">
+                    Min. Rp {minTopUp.toLocaleString('id-ID')}
+                  </span>
+                </div>
                 <div className="grid grid-cols-3 gap-2">
-                  {[35000, 50000, 100000, 200000, 350000, 500000].map(amt => (
+                  {topUpPresets.map(amt => (
                     <button
                       key={amt}
                       type="button"
@@ -537,7 +569,7 @@ export const MemberDashboard: React.FC = () => {
                         setTopUpAmount(amt);
                         setCustomAmount('');
                       }}
-                      className={`p-2.5 rounded-xl text-xs font-bold border transition-all ${
+                      className={`p-2.5 rounded-xl text-xs font-bold border transition-all cursor-pointer ${
                         !customAmount && topUpAmount === amt
                           ? 'border-blue-600 bg-blue-50 text-blue-700 ring-2 ring-blue-500/20'
                           : 'border-slate-200 hover:bg-slate-50 text-slate-700'
@@ -554,12 +586,17 @@ export const MemberDashboard: React.FC = () => {
                   </label>
                   <input
                     type="number"
-                    min="10000"
-                    placeholder="contoh: 150000"
+                    min={minTopUp}
+                    placeholder={`Min. Rp ${minTopUp.toLocaleString('id-ID')}`}
                     value={customAmount}
                     onChange={e => setCustomAmount(e.target.value)}
                     className="w-full px-3 py-2 text-sm border border-slate-200 rounded-xl focus:ring-2 focus:ring-blue-500 focus:outline-hidden"
                   />
+                  {customAmount && parseInt(customAmount, 10) < minTopUp && (
+                    <p className="text-[11px] text-red-500 font-bold mt-1">
+                      ⚠️ Nominal minimal top up adalah Rp {minTopUp.toLocaleString('id-ID')} (sesuai ketentuan admin).
+                    </p>
+                  )}
                 </div>
               </div>
 
@@ -617,9 +654,9 @@ export const MemberDashboard: React.FC = () => {
               {/* Submit Top Up Action */}
               <button
                 type="button"
-                disabled={isProcessingTopUp}
+                disabled={isProcessingTopUp || Boolean(customAmount && parseInt(customAmount, 10) < minTopUp)}
                 onClick={handleExecuteTopUp}
-                className="w-full py-3 px-4 rounded-xl bg-blue-600 hover:bg-blue-700 disabled:bg-slate-300 text-white font-bold text-sm shadow-sm shadow-blue-200 transition-all flex items-center justify-center gap-2"
+                className="w-full py-3 px-4 rounded-xl bg-blue-600 hover:bg-blue-700 disabled:bg-slate-300 text-white font-bold text-sm shadow-sm shadow-blue-200 transition-all flex items-center justify-center gap-2 cursor-pointer disabled:cursor-not-allowed"
               >
                 {isProcessingTopUp ? (
                   <>
