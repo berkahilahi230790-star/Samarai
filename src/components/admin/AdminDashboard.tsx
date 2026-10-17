@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import QRCode from 'qrcode';
 import {
   Users,
@@ -27,7 +27,14 @@ import {
   GraduationCap,
   ScanLine,
   Sparkles,
+  Trash2,
   Image as ImageIcon,
+  Upload,
+  Info,
+  AlertCircle,
+  Smartphone,
+  Send,
+  ExternalLink,
 } from 'lucide-react';
 import { useApp } from '../../context/AppContext';
 import { User, Transaction, BusinessSettings, UserRole } from '../../types';
@@ -48,6 +55,8 @@ export const AdminDashboard: React.FC = () => {
     updateUserRole,
     manualAdjustBalance,
     cancelTransaction,
+    deleteUser,
+    simulateQrisWebhookPayment,
   } = useApp();
 
   const [activeTab, setActiveTab] = useState<'traffic' | 'customers' | 'transactions' | 'reports' | 'settings'>('settings');
@@ -74,6 +83,130 @@ export const AdminDashboard: React.FC = () => {
   // Settings form state
   const [formSettings, setFormSettings] = useState<BusinessSettings>(settings);
   const [settingsSaved, setSettingsSaved] = useState(false);
+  const [logoNotice, setLogoNotice] = useState<string | null>(null);
+  const [logoImageError, setLogoImageError] = useState(false);
+  const logoFileInputRef = useRef<HTMLInputElement>(null);
+
+  // Helper untuk mengubah URL Google Drive menjadi tautan gambar langsung (thumbnail/direct stream)
+  const convertGoogleDriveUrl = (rawUrl: string): { url: string; wasConverted: boolean } => {
+    if (!rawUrl || typeof rawUrl !== 'string') return { url: rawUrl, wasConverted: false };
+    const trimmed = rawUrl.trim();
+
+    // 1. Format: https://drive.google.com/file/d/FILE_ID/view...
+    const fileMatch = trimmed.match(/\/file\/d\/([a-zA-Z0-9_-]+)/);
+    if (fileMatch && fileMatch[1]) {
+      return {
+        url: `https://drive.google.com/thumbnail?id=${fileMatch[1]}&sz=w1000`,
+        wasConverted: true,
+      };
+    }
+
+    // 2. Format: https://drive.google.com/open?id=FILE_ID atau uc?id=FILE_ID
+    const idMatch = trimmed.match(/[?&]id=([a-zA-Z0-9_-]+)/);
+    if (idMatch && idMatch[1]) {
+      return {
+        url: `https://drive.google.com/thumbnail?id=${idMatch[1]}&sz=w1000`,
+        wasConverted: true,
+      };
+    }
+
+    return { url: trimmed, wasConverted: false };
+  };
+
+  const handleLogoUrlChange = (val: string) => {
+    const { url, wasConverted } = convertGoogleDriveUrl(val);
+    setLogoImageError(false);
+    setFormSettings(prev => ({ ...prev, logoUrl: url }));
+    if (wasConverted) {
+      setLogoNotice('Link Google Drive berhasil otomatis diubah menjadi tautan gambar langsung!');
+      setTimeout(() => setLogoNotice(null), 5000);
+    }
+  };
+
+  const handleLogoFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    if (file.size > 5 * 1024 * 1024) {
+      alert('Ukuran file foto logo terlalu besar. Maksimal 5MB.');
+      return;
+    }
+
+    const reader = new FileReader();
+    reader.onload = () => {
+      if (typeof reader.result === 'string') {
+        setLogoImageError(false);
+        setFormSettings(prev => ({ ...prev, logoUrl: reader.result as string }));
+        setLogoNotice('Logo berhasil dimuat langsung dari perangkat Anda!');
+        setTimeout(() => setLogoNotice(null), 4000);
+      }
+    };
+    reader.readAsDataURL(file);
+
+    if (logoFileInputRef.current) {
+      logoFileInputRef.current.value = '';
+    }
+  };
+
+  // Webhook Simulator state in Admin
+  const [testWebhookMemberId, setTestWebhookMemberId] = useState<string>('');
+  const [testWebhookAmount, setTestWebhookAmount] = useState<number>(100000);
+  const [isSendingWebhookTest, setIsSendingWebhookTest] = useState(false);
+  const [webhookTestFeedback, setWebhookTestFeedback] = useState<string | null>(null);
+
+  const handleTriggerWebhookTest = async () => {
+    setIsSendingWebhookTest(true);
+    setWebhookTestFeedback(null);
+    try {
+      const res = await simulateQrisWebhookPayment(testWebhookAmount, testWebhookMemberId || undefined);
+      setWebhookTestFeedback(res.message);
+      setTimeout(() => setWebhookTestFeedback(null), 6000);
+    } catch (e: any) {
+      setWebhookTestFeedback(`Gagal: ${e?.message || 'Error mengirim webhook'}`);
+    } finally {
+      setIsSendingWebhookTest(false);
+    }
+  };
+
+  const handleTriggerNotivgoTest = async (appType: 'BCA' | 'DANA' | 'Mandiri') => {
+    setIsSendingWebhookTest(true);
+    setWebhookTestFeedback(null);
+    try {
+      const targetUser = users.find(u => u.id === (testWebhookMemberId || users.find(x => x.role === 'member')?.id)) || users[0];
+      const payload = {
+        app: appType === 'BCA' ? 'BCA Mobile' : appType === 'DANA' ? 'DANA' : 'Livin by Mandiri',
+        title: `${appType}: Transfer Masuk / QRIS`,
+        content: `Penerimaan dana Rp ${testWebhookAmount.toLocaleString('id-ID')} dari ${targetUser?.name || 'Member'} catatan ${targetUser?.memberNumber || 'SMP20250811'}`,
+        nominal: testWebhookAmount,
+        amount: testWebhookAmount,
+        sender: targetUser?.name || 'Pelanggan',
+        note: targetUser?.memberNumber || 'SMP20250811',
+        memberNumber: targetUser?.memberNumber,
+        memberId: targetUser?.id,
+        time: new Date().toISOString(),
+        status: 'success',
+        type: 'credit',
+      };
+
+      const res = await fetch('/api/webhook/notivgo', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      });
+
+      if (res.ok) {
+        const json = await res.json();
+        setWebhookTestFeedback(`✅ NotivGo (${payload.app}): Callback berhasil diterima! Rp ${testWebhookAmount.toLocaleString('id-ID')} langsung ditambahkan ke saldo ${targetUser?.name}. Efek koin & notifikasi aktif.`);
+      } else {
+        setWebhookTestFeedback(`Gagal memanggil endpoint NotivGo: HTTP ${res.status}`);
+      }
+      setTimeout(() => setWebhookTestFeedback(null), 7000);
+    } catch (e: any) {
+      setWebhookTestFeedback(`Gagal: ${e?.message || 'Error mengirim simulasi NotivGo'}`);
+    } finally {
+      setIsSendingWebhookTest(false);
+    }
+  };
 
   useEffect(() => {
     setFormSettings(settings);
@@ -478,6 +611,25 @@ export const AdminDashboard: React.FC = () => {
                 <option value="active">Aktif</option>
                 <option value="suspended">Ditangguhkan</option>
               </select>
+
+              {/* Tombol Hapus Database Karyawan & Guru Les */}
+              {users.some(u => u.role === 'coach' || u.role === 'gate') && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    if (window.confirm('Apakah Anda yakin ingin menghapus semua database akun Karyawan dan Guru Les dari sistem?')) {
+                      users
+                        .filter(u => u.role === 'coach' || u.role === 'gate')
+                        .forEach(u => deleteUser(u.id));
+                    }
+                  }}
+                  className="px-3 py-1.5 text-xs font-bold bg-red-50 hover:bg-red-100 text-red-700 border border-red-200 rounded-xl transition-colors flex items-center gap-1.5 cursor-pointer shrink-0"
+                  title="Hapus semua akun Karyawan dan Guru Les dari database sistem"
+                >
+                  <Trash2 className="w-3.5 h-3.5" />
+                  <span>Hapus Database Karyawan & Guru Les</span>
+                </button>
+              )}
             </div>
           </div>
 
@@ -600,6 +752,17 @@ export const AdminDashboard: React.FC = () => {
                           title={m.status === 'active' ? 'Tangguhkan Member' : 'Aktifkan Member'}
                         >
                           {m.status === 'active' ? <XCircle className="w-4 h-4" /> : <CheckCircle className="w-4 h-4" />}
+                        </button>
+                        <button
+                          onClick={() => {
+                            if (window.confirm(`Hapus pengguna "${m.name}" (${m.role}) dari database?`)) {
+                              deleteUser(m.id);
+                            }
+                          }}
+                          className="p-1.5 text-slate-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors cursor-pointer"
+                          title="Hapus Pengguna dari Database"
+                        >
+                          <Trash2 className="w-4 h-4" />
                         </button>
                       </td>
                     </tr>
@@ -834,39 +997,116 @@ export const AdminDashboard: React.FC = () => {
           <form onSubmit={handleSaveSettings} className="space-y-4 text-xs">
             
             {/* Logo Preview & Input */}
-            <div>
-              <label className="block font-bold text-slate-700 mb-1">Logo Usaha (URL Gambar)</label>
-              <div className="flex items-center gap-4">
-                <div className="w-16 h-16 rounded-2xl bg-slate-100 border border-slate-200 overflow-hidden flex items-center justify-center shrink-0">
-                  {formSettings.logoUrl ? (
-                    <img src={formSettings.logoUrl} alt="Logo" className="w-full h-full object-cover" />
+            <div className="bg-slate-50/70 border border-slate-200/80 rounded-2xl p-4 space-y-3">
+              <div className="flex items-center justify-between">
+                <label className="block font-bold text-slate-800 text-xs">
+                  Logo Usaha (URL Gambar / Unggah File)
+                </label>
+                <span className="text-[11px] text-slate-500 font-medium">
+                  Mendukung JPG, PNG, WebP & Google Drive
+                </span>
+              </div>
+
+              <div className="flex flex-col sm:flex-row sm:items-start gap-4">
+                {/* Logo Preview Frame */}
+                <div className="w-16 h-16 rounded-2xl bg-white border border-slate-200 shadow-xs overflow-hidden flex items-center justify-center shrink-0 relative group">
+                  {formSettings.logoUrl && !logoImageError ? (
+                    <img
+                      src={formSettings.logoUrl}
+                      alt="Logo"
+                      referrerPolicy="no-referrer"
+                      className="w-full h-full object-cover"
+                      onError={() => setLogoImageError(true)}
+                    />
                   ) : (
-                    <Building2 className="w-8 h-8 text-slate-400" />
+                    <div className="flex flex-col items-center justify-center text-slate-400">
+                      <Building2 className="w-7 h-7" />
+                      {logoImageError && <span className="text-[8px] text-rose-500 font-bold">Gagal Muat</span>}
+                    </div>
                   )}
                 </div>
-                <div className="flex-1 space-y-1">
-                  <input
-                    type="url"
-                    placeholder="https://... URL gambar logo"
-                    value={formSettings.logoUrl}
-                    onChange={e => setFormSettings({ ...formSettings, logoUrl: e.target.value })}
-                    className="w-full px-3 py-2 border border-slate-200 rounded-xl focus:ring-2 focus:ring-blue-500 focus:outline-hidden"
-                  />
+
+                <div className="flex-1 space-y-2">
                   <div className="flex gap-2">
+                    <input
+                      type="url"
+                      placeholder="Tempel tautan URL gambar atau link Google Drive di sini..."
+                      value={formSettings.logoUrl}
+                      onChange={e => handleLogoUrlChange(e.target.value)}
+                      className="flex-1 px-3 py-2 bg-white border border-slate-200 rounded-xl focus:ring-2 focus:ring-blue-500 focus:outline-hidden text-xs"
+                    />
+
+                    {/* Hidden Native File Input */}
+                    <input
+                      type="file"
+                      ref={logoFileInputRef}
+                      onChange={handleLogoFileUpload}
+                      accept="image/png,image/jpeg,image/webp,image/svg+xml"
+                      className="hidden"
+                    />
+
+                    {/* Tombol Unggah File Lokal */}
                     <button
                       type="button"
-                      onClick={() => setFormSettings({ ...formSettings, logoUrl: 'https://images.unsplash.com/photo-1576013551627-0cc20b96c2a7?w=160&h=160&fit=crop&crop=faces&q=80' })}
-                      className="text-[10px] text-blue-600 hover:underline font-medium"
+                      onClick={() => logoFileInputRef.current?.click()}
+                      className="px-3 py-2 rounded-xl bg-blue-600 hover:bg-blue-700 active:bg-blue-800 text-white font-bold text-xs flex items-center gap-1.5 transition-colors cursor-pointer shrink-0 shadow-xs"
+                      title="Pilih foto langsung dari komputer / HP"
                     >
-                      Preset Kolam Renang 1
+                      <Upload className="w-3.5 h-3.5" />
+                      <span>Upload File</span>
                     </button>
-                    <button
-                      type="button"
-                      onClick={() => setFormSettings({ ...formSettings, logoUrl: 'https://images.unsplash.com/photo-1560090995-01632a28895b?w=160&h=160&fit=crop&q=80' })}
-                      className="text-[10px] text-blue-600 hover:underline font-medium"
-                    >
-                      Preset Kolam Renang 2
-                    </button>
+                  </div>
+
+                  {/* Feedback Notifikasi Sukses */}
+                  {logoNotice && (
+                    <div className="flex items-center gap-1.5 text-[11px] font-semibold text-emerald-700 bg-emerald-50 border border-emerald-200 rounded-lg px-2.5 py-1.5 animate-fade-in">
+                      <CheckCircle className="w-3.5 h-3.5 shrink-0" />
+                      <span>{logoNotice}</span>
+                    </div>
+                  )}
+
+                  {/* Warning jika link Google Drive gagal dimuat karena akses terkunci */}
+                  {logoImageError && (
+                    <div className="flex items-start gap-1.5 text-[11px] font-medium text-rose-700 bg-rose-50 border border-rose-200 rounded-lg p-2.5">
+                      <AlertCircle className="w-4 h-4 text-rose-600 shrink-0 mt-0.5" />
+                      <div>
+                        <strong className="font-bold block">Gambar tidak terbaca:</strong>
+                        Jika menggunakan link Google Drive, pastikan status akses file diatur ke{' '}
+                        <strong>"Siapa saja yang memiliki link" (Public)</strong> di Google Drive, atau gunakan tombol <strong>Upload File</strong> untuk langsung memilih gambar dari perangkat Anda.
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Quick Preset Buttons & Google Drive Tip */}
+                  <div className="flex flex-wrap items-center justify-between gap-2 pt-1">
+                    <div className="flex items-center gap-2">
+                      <span className="text-[10px] text-slate-400 font-medium">Contoh Preset:</span>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setLogoImageError(false);
+                          setFormSettings({ ...formSettings, logoUrl: 'https://images.unsplash.com/photo-1576013551627-0cc20b96c2a7?w=160&h=160&fit=crop&crop=faces&q=80' });
+                        }}
+                        className="text-[10px] text-blue-600 hover:underline font-bold"
+                      >
+                        Preset Kolam 1
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setLogoImageError(false);
+                          setFormSettings({ ...formSettings, logoUrl: 'https://images.unsplash.com/photo-1560090995-01632a28895b?w=160&h=160&fit=crop&q=80' });
+                        }}
+                        className="text-[10px] text-blue-600 hover:underline font-bold"
+                      >
+                        Preset Kolam 2
+                      </button>
+                    </div>
+
+                    <div className="flex items-center gap-1 text-[10px] text-slate-500">
+                      <Info className="w-3 h-3 text-blue-500" />
+                      <span>Link Google Drive akan otomatis dikonversi oleh sistem</span>
+                    </div>
                   </div>
                 </div>
               </div>
@@ -1010,12 +1250,7 @@ export const AdminDashboard: React.FC = () => {
                   </div>
                 </div>
 
-                <div className="mt-2 text-[11px] text-slate-500 bg-emerald-50/70 border border-emerald-200/80 p-2.5 rounded-xl flex items-center gap-2">
-                  <span className="font-bold text-emerald-800 shrink-0">Simulasi Tombol Karyawan:</span>
-                  <span className="text-emerald-900 font-medium">
-                    6 Pilihan nominal di loket otomatis: Rp {((formSettings.minTopUpEmployee ?? 100000) * 1).toLocaleString('id-ID')}, Rp {Math.round(((formSettings.minTopUpEmployee ?? 100000) * 1.25) / 1000 * 1000).toLocaleString('id-ID')}, Rp {Math.round(((formSettings.minTopUpEmployee ?? 100000) * 1.5) / 1000 * 1000).toLocaleString('id-ID')}, Rp {((formSettings.minTopUpEmployee ?? 100000) * 2).toLocaleString('id-ID')}, Rp {Math.round(((formSettings.minTopUpEmployee ?? 100000) * 2.5) / 1000 * 1000).toLocaleString('id-ID')}, Rp {((formSettings.minTopUpEmployee ?? 100000) * 3).toLocaleString('id-ID')}
-                  </span>
-                </div>
+
               </div>
             </div>
 
@@ -1048,14 +1283,186 @@ export const AdminDashboard: React.FC = () => {
               </div>
             </div>
 
-            <div>
-              <label className="block font-bold text-slate-700 mb-1">Alamat Lengkap</label>
-              <input
-                type="text"
-                value={formSettings.address}
-                onChange={e => setFormSettings({ ...formSettings, address: e.target.value })}
-                className="w-full px-3 py-2 border border-slate-200 rounded-xl focus:ring-2 focus:ring-blue-500 focus:outline-hidden"
-              />
+            {/* INTEGRASI WEBHOOK QRIS & SIMULASI INSTAN */}
+            <div className="bg-gradient-to-br from-amber-50/80 via-yellow-50/50 to-orange-50/40 p-5 rounded-2xl border border-amber-200/80 space-y-4">
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-amber-200/60 pb-3">
+                <div className="flex items-center gap-2.5">
+                  <div className="w-9 h-9 rounded-xl bg-gradient-to-tr from-amber-500 to-yellow-500 text-white flex items-center justify-center font-black shadow-xs">
+                    ⚡
+                  </div>
+                  <div>
+                    <h4 className="text-xs font-black text-slate-900 uppercase tracking-wider flex items-center gap-2">
+                      Integrasi Webhook QRIS & NotivGo (notivgo.com)
+                      <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-800">
+                        Aktif • Realtime SSE
+                      </span>
+                    </h4>
+                    <p className="text-[11px] text-slate-500 font-medium">
+                      Otomatisasi pengisian koin saat ada pembayaran QRIS atau transfer bank masuk secara realtime tanpa cek manual.
+                    </p>
+                  </div>
+                </div>
+              </div>
+
+              {/* Endpoints Display */}
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-3 text-xs">
+                {/* NotivGo Integration Card */}
+                <div className="bg-gradient-to-br from-blue-50 to-indigo-50/40 p-3.5 rounded-xl border border-blue-200/80 space-y-2">
+                  <div className="flex items-center justify-between">
+                    <span className="text-[11px] font-bold text-blue-900 flex items-center gap-1.5 uppercase tracking-wider">
+                      <Smartphone className="w-3.5 h-3.5 text-blue-600" />
+                      1. NotivGo (notivgo.com)
+                    </span>
+                    <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-blue-100 text-blue-800">
+                      Rekomendasi QRIS Statis
+                    </span>
+                  </div>
+                  <div className="font-mono text-xs bg-slate-900 text-blue-300 p-2 rounded-lg font-bold select-all break-all">
+                    /api/webhook/notivgo
+                  </div>
+                  <div className="text-[11px] text-slate-600 space-y-1">
+                    <p>• <strong>Fungsi:</strong> Meneruskan notifikasi mutasi dari HP Android kasir (BCA, Mandiri Livin, BRImo, DANA, GoPay, OVO, ShopeePay).</p>
+                    <p>• <strong>Cara Kerja:</strong> Pasang NotivGo di HP & masukkan Webhook URL di atas pada portal <code>notivgo.com</code>. Sistem otomatis mendeteksi ID Member (<code>SMP...</code>) dari berita transfer atau nama pengirim!</p>
+                  </div>
+                </div>
+
+                {/* Gateway Standard Card */}
+                <div className="bg-white p-3.5 rounded-xl border border-amber-200/70 space-y-2">
+                  <div className="flex items-center justify-between">
+                    <span className="text-[11px] font-bold text-amber-900 flex items-center gap-1.5 uppercase tracking-wider">
+                      <span>🏦</span>
+                      2. Payment Gateway QRIS
+                    </span>
+                    <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-amber-100 text-amber-800">
+                      Midtrans / Xendit / Tripay
+                    </span>
+                  </div>
+                  <div className="font-mono text-xs bg-slate-900 text-amber-300 p-2 rounded-lg font-bold select-all break-all">
+                    /api/webhook/qris
+                  </div>
+                  <div className="text-[11px] text-slate-600 space-y-1">
+                    <p>• <strong>Fungsi:</strong> Callback instan untuk QRIS Dinamis API resmi (Midtrans, Xendit, Tripay, Doku).</p>
+                    <p>• <strong>Payload:</strong> Mendukung parameter <code>status: PAID</code>, <code>amount</code>, dan <code>memberNumber</code>.</p>
+                  </div>
+                </div>
+              </div>
+
+              {/* Step by Step Guide for NotivGo */}
+              <div className="bg-slate-50 p-3.5 rounded-xl border border-slate-200 text-xs space-y-2">
+                <span className="text-[11px] font-bold text-slate-800 flex items-center gap-1.5 uppercase tracking-wider">
+                  <Info className="w-3.5 h-3.5 text-blue-600" />
+                  Panduan Menghubungkan Samarai dengan NotivGo (notivgo.com)
+                </span>
+                <ol className="list-decimal list-inside text-[11px] text-slate-600 space-y-1 leading-relaxed">
+                  <li>Daftar akun di <strong className="text-slate-800">notivgo.com</strong> dan install aplikasi NotivGo di HP Android kasir/tempat m-banking QRIS terpasang.</li>
+                  <li>Di menu aplikasi NotivGo, pilih aplikasi perbankan/e-wallet yang ingin dipantau (misal: BCA Mobile, Mandiri, DANA, GoPay).</li>
+                  <li>Di portal NotivGo, tambahkan Webhook URL: <code className="bg-white px-1.5 py-0.5 rounded border border-slate-300 text-slate-800 font-bold select-all">https://[DOMAIN-APLIKASI]/api/webhook/notivgo</code></li>
+                  <li>Saat ada transaksi masuk, NotivGo akan membaca notifikasi HP lalu mem-forward ke sistem Samarai secara instan. Saldo koin member langsung bertambah & membunyikan suara koin jatuh!</li>
+                </ol>
+              </div>
+
+              {/* Live Testing Simulator Form */}
+              <div className="bg-white/90 p-4 rounded-xl border border-amber-200/70 space-y-3">
+                <div className="flex items-center justify-between">
+                  <span className="text-xs font-bold text-amber-900 flex items-center gap-1.5">
+                    <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
+                    Uji Coba / Simulasi Notifikasi Masuk (Live Testing)
+                  </span>
+                  <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">
+                    Testing Console
+                  </span>
+                </div>
+
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  <div>
+                    <label className="block text-[11px] font-semibold text-slate-600 mb-1">
+                      Pilih Member Penerima Koin
+                    </label>
+                    <select
+                      value={testWebhookMemberId}
+                      onChange={e => setTestWebhookMemberId(e.target.value)}
+                      className="w-full px-3 py-2 text-xs bg-slate-50 border border-slate-200 rounded-xl focus:ring-2 focus:ring-amber-500 focus:outline-hidden font-medium"
+                    >
+                      <option value="">Member Sedang Aktif / Pertama</option>
+                      {users.filter(u => u.role === 'member').map(m => (
+                        <option key={m.id} value={m.id}>
+                          {m.name} ({m.memberNumber}) - Saldo: Rp {m.balance.toLocaleString('id-ID')}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+
+                  <div>
+                    <label className="block text-[11px] font-semibold text-slate-600 mb-1">
+                      Nominal Pembayaran (Rp)
+                    </label>
+                    <input
+                      type="number"
+                      step="10000"
+                      min="10000"
+                      value={testWebhookAmount}
+                      onChange={e => setTestWebhookAmount(Math.max(1000, parseInt(e.target.value, 10) || 0))}
+                      className="w-full px-3 py-2 text-xs bg-slate-50 border border-slate-200 rounded-xl focus:ring-2 focus:ring-amber-500 focus:outline-hidden font-bold"
+                    />
+                  </div>
+                </div>
+
+                {/* Simulation Action Buttons */}
+                <div className="space-y-1.5">
+                  <span className="text-[10px] font-bold text-slate-500 uppercase tracking-wider block">
+                    Pilih Format Simulasi yang Ingin Diuji:
+                  </span>
+                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+                    <button
+                      type="button"
+                      disabled={isSendingWebhookTest}
+                      onClick={() => handleTriggerNotivgoTest('BCA')}
+                      className="py-2 px-3 bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700 disabled:from-slate-300 disabled:to-slate-300 text-white font-bold text-xs rounded-xl shadow-xs transition-all flex items-center justify-center gap-1.5 cursor-pointer"
+                    >
+                      {isSendingWebhookTest ? (
+                        <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+                      ) : (
+                        <Smartphone className="w-3.5 h-3.5 text-blue-200" />
+                      )}
+                      <span>Test NotivGo (BCA)</span>
+                    </button>
+
+                    <button
+                      type="button"
+                      disabled={isSendingWebhookTest}
+                      onClick={() => handleTriggerNotivgoTest('DANA')}
+                      className="py-2 px-3 bg-gradient-to-r from-sky-500 to-cyan-600 hover:from-sky-600 hover:to-cyan-700 disabled:from-slate-300 disabled:to-slate-300 text-white font-bold text-xs rounded-xl shadow-xs transition-all flex items-center justify-center gap-1.5 cursor-pointer"
+                    >
+                      {isSendingWebhookTest ? (
+                        <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+                      ) : (
+                        <Smartphone className="w-3.5 h-3.5 text-cyan-200" />
+                      )}
+                      <span>Test NotivGo (DANA QRIS)</span>
+                    </button>
+
+                    <button
+                      type="button"
+                      disabled={isSendingWebhookTest}
+                      onClick={handleTriggerWebhookTest}
+                      className="py-2 px-3 bg-gradient-to-r from-amber-500 to-yellow-500 hover:from-amber-600 hover:to-yellow-600 disabled:from-slate-300 disabled:to-slate-300 text-white font-bold text-xs rounded-xl shadow-xs transition-all flex items-center justify-center gap-1.5 cursor-pointer"
+                    >
+                      {isSendingWebhookTest ? (
+                        <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+                      ) : (
+                        <span>⚡ Test QRIS Standard</span>
+                      )}
+                    </button>
+                  </div>
+                </div>
+
+                {webhookTestFeedback && (
+                  <div className="p-2.5 bg-emerald-50 border border-emerald-200 rounded-xl text-emerald-800 text-xs font-semibold flex items-center gap-2">
+                    <CheckCircle className="w-4 h-4 text-emerald-600 shrink-0" />
+                    <span>{webhookTestFeedback}</span>
+                  </div>
+                )}
+              </div>
             </div>
 
             <div className="pt-3">

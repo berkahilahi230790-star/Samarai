@@ -121,6 +121,19 @@ interface AppContextType {
   // Member QR Token
   refreshMemberQRToken: (userId: string) => string;
 
+  // Real-time QRIS Webhook & Instant Coin Animation
+  qrisCoinAlert: {
+    amount: number;
+    userName: string;
+    memberNumber: string;
+    channelName: string;
+    referenceId: string;
+    timestamp: string;
+  } | null;
+  dismissCoinAlert: () => void;
+  triggerCoinDropEffect: (amount: number) => void;
+  simulateQrisWebhookPayment: (amount: number, targetUserId?: string) => Promise<{ success: boolean; message: string }>;
+
   // Notifications
   dismissToast: () => void;
   markNotificationAsRead: (id: string) => void;
@@ -142,11 +155,26 @@ const STORAGE_KEYS = {
 };
 
 export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
+  // Helper to normalize member numbers without dashes: e.g. SMP-2025-0811 -> SMP20250811
+  const normalizeMemberNumber = (num: string, role?: string): string => {
+    if (!num) return num;
+    if (role === 'member' || num.toUpperCase().startsWith('SMP')) {
+      // Remove any dashes after SMP prefix and keep numbers
+      const cleanDigits = num.replace(/^SMP[-_]?/i, '').replace(/[^0-9]/g, '');
+      return `SMP${cleanDigits}`;
+    }
+    return num;
+  };
+
   // Load from local storage or fallback to initial
   const [users, setUsers] = useState<User[]>(() => {
     try {
       const saved = localStorage.getItem(STORAGE_KEYS.USERS);
-      return saved ? JSON.parse(saved) : INITIAL_USERS;
+      const parsed: User[] = saved ? JSON.parse(saved) : INITIAL_USERS;
+      return parsed.map(u => ({
+        ...u,
+        memberNumber: normalizeMemberNumber(u.memberNumber, u.role),
+      }));
     } catch {
       return INITIAL_USERS;
     }
@@ -155,7 +183,11 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   const [transactions, setTransactions] = useState<Transaction[]>(() => {
     try {
       const saved = localStorage.getItem(STORAGE_KEYS.TRANSACTIONS);
-      return saved ? JSON.parse(saved) : INITIAL_TRANSACTIONS;
+      const parsed: Transaction[] = saved ? JSON.parse(saved) : INITIAL_TRANSACTIONS;
+      return parsed.map(t => ({
+        ...t,
+        memberNumber: normalizeMemberNumber(t.memberNumber),
+      }));
     } catch {
       return INITIAL_TRANSACTIONS;
     }
@@ -238,6 +270,18 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   });
 
   const [activeToast, setActiveToast] = useState<PushNotification | null>(null);
+  const [qrisCoinAlert, setQrisCoinAlert] = useState<{
+    amount: number;
+    userName: string;
+    memberNumber: string;
+    channelName: string;
+    referenceId: string;
+    timestamp: string;
+  } | null>(null);
+
+  const dismissCoinAlert = () => {
+    setQrisCoinAlert(null);
+  };
 
   // Current logged in user (default to member-01 for immediate live testing)
   const [currentUser, setCurrentUserState] = useState<User | null>(() => {
@@ -301,6 +345,60 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     }
   }, [users]);
 
+  // Play sparkling coin cash register chime sound
+  const playCoinChimeSound = () => {
+    try {
+      const audioCtx = new (window.AudioContext || (window as any).webkitAudioContext)();
+      const now = audioCtx.currentTime;
+      
+      // Arpeggiated high frequency coins (C6 -> E6 -> G6 -> C7)
+      const freqs = [1046.5, 1318.5, 1567.98, 2093.0];
+      freqs.forEach((freq, idx) => {
+        const osc = audioCtx.createOscillator();
+        const gain = audioCtx.createGain();
+        osc.type = 'triangle';
+        osc.frequency.setValueAtTime(freq, now + idx * 0.08);
+        gain.gain.setValueAtTime(0.22, now + idx * 0.08);
+        gain.gain.exponentialRampToValueAtTime(0.001, now + idx * 0.08 + 0.35);
+        osc.connect(gain);
+        gain.connect(audioCtx.destination);
+        osc.start(now + idx * 0.08);
+        osc.stop(now + idx * 0.08 + 0.35);
+      });
+    } catch {
+      // AudioContext not allowed without user interaction yet, ignore safely
+    }
+  };
+
+  // Spectacular coin blast animation
+  const triggerCoinDropEffect = (amount: number) => {
+    playCoinChimeSound();
+    try {
+      // Golden coin bursts from both sides and center
+      const count = Math.min(120, Math.max(50, Math.floor(amount / 5000)));
+      confetti({
+        particleCount: count,
+        angle: 60,
+        spread: 55,
+        origin: { x: 0, y: 0.7 },
+        colors: ['#fbbf24', '#f59e0b', '#d97706', '#fef08a', '#10b981'],
+        shapes: ['circle'],
+        scalar: 1.2,
+      });
+      confetti({
+        particleCount: count,
+        angle: 120,
+        spread: 55,
+        origin: { x: 1, y: 0.7 },
+        colors: ['#fbbf24', '#f59e0b', '#d97706', '#fef08a', '#3b82f6'],
+        shapes: ['circle'],
+        scalar: 1.2,
+      });
+    } catch {
+      // ignore
+    }
+  };
+
   // Trigger sound effect for push notification if supported
   const playNotificationSound = () => {
     try {
@@ -360,6 +458,37 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     const found = users.find(u => u.role === role);
     if (found) {
       setCurrentUserState(found);
+    } else {
+      const nowIso = new Date().toISOString().split('T')[0];
+      const fallbackUser: User = {
+        id: `usr-${role}-${Date.now().toString().slice(-4)}`,
+        name:
+          role === 'gate'
+            ? 'Petugas Loket Samarai'
+            : role === 'coach'
+            ? 'Guru Les Samarai'
+            : role === 'admin'
+            ? 'Admin Samarai'
+            : 'Pengunjung Samarai',
+        email: `${role}@samaraipark.com`,
+        phone: '081234567890',
+        role,
+        balance: role === 'member' ? 50000 : 0,
+        memberNumber:
+          role === 'gate'
+            ? 'STF-KARYAWAN-01'
+            : role === 'coach'
+            ? 'GURU-LES-01'
+            : role === 'admin'
+            ? 'ADM-SAMARAI-01'
+            : `SMP${new Date().getFullYear()}0001`,
+        joinDate: nowIso,
+        status: 'active',
+        enrolledCourseIds: [],
+        teachingCourseIds: [],
+      };
+      setUsers(prev => [fallbackUser, ...prev]);
+      setCurrentUserState(fallbackUser);
     }
   };
 
@@ -486,29 +615,32 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     setUsers(prev => prev.map(u => (u.id === member.id ? { ...u, balance: newBalance } : u)));
     setTransactions(prev => [newTx, ...prev]);
 
-    // Confetti effect
-    try {
-      confetti({
-        particleCount: 80,
-        spread: 70,
-        origin: { y: 0.6 },
-        colors: ['#06b6d4', '#3b82f6', '#10b981', '#f59e0b'],
+    // Trigger sound and coin animation
+    triggerCoinDropEffect(amount);
+
+    // If payment method is QRIS or e-wallet, trigger instant Coin Alert Popup
+    if (method === 'e_wallet' || channelName?.toUpperCase().includes('QRIS')) {
+      setQrisCoinAlert({
+        amount,
+        userName: member.name,
+        memberNumber: member.memberNumber,
+        channelName: channelName || 'QRIS Instant Settlement',
+        referenceId: txCode,
+        timestamp: nowIso,
       });
-    } catch {
-      // ignore
     }
 
     dispatchPushNotification({
       userId: member.id,
-      title: 'Top Up Saldo Berhasil! 💳',
-      message: `Saldo sebesar Rp ${amount.toLocaleString('id-ID')} telah berhasil ditambahkan ke akun Anda via ${channelName || method}. Saldo baru: Rp ${newBalance.toLocaleString('id-ID')}.`,
-      type: 'top_up',
-      data: { amount, newBalance },
+      title: '🪙 Koin Saldo Masuk: Top Up QRIS Berhasil!',
+      message: `Selamat! Koin saldo sebesar Rp ${amount.toLocaleString('id-ID')} telah diterima secara instan via ${channelName || method}. Saldo Anda sekarang: Rp ${newBalance.toLocaleString('id-ID')}.`,
+      type: 'qris_coin_received',
+      data: { amount, newBalance, txCode },
     });
 
     return {
       success: true,
-      message: `Top up Rp ${amount.toLocaleString('id-ID')} berhasil!`,
+      message: `Top up Rp ${amount.toLocaleString('id-ID')} berhasil! Koin saldo langsung aktif.`,
       transaction: newTx,
     };
   };
@@ -607,7 +739,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     const assignedRole: UserRole = data.role || 'member';
     const memberNum = assignedRole === 'coach'
       ? `GURU-${new Date().getFullYear()}-${Math.floor(100 + Math.random() * 900)}`
-      : `SMP-${new Date().getFullYear()}-${Math.floor(1000 + Math.random() * 9000)}`;
+      : `SMP${new Date().getFullYear()}${Math.floor(1000 + Math.random() * 9000)}`;
     const newId = assignedRole === 'coach' ? `usr-coach-${Date.now()}` : `usr-member-${Date.now()}`;
     const deposit = assignedRole === 'coach' ? 0 : (data.initialDeposit || 50000); // Free bonus for member
 
@@ -1310,7 +1442,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
           ? `GURU-LES-${Math.floor(10 + Math.random() * 90)}`
           : userData.role === 'gate'
           ? `STF-KARYAWAN-${Math.floor(10 + Math.random() * 90)}`
-          : `SMP-${new Date().getFullYear()}-${Math.floor(1000 + Math.random() * 9000)}`
+          : `SMP${new Date().getFullYear()}${Math.floor(1000 + Math.random() * 9000)}`
       ),
       joinDate: userData.joinDate || nowIso,
       status: userData.status || 'active',
@@ -1422,6 +1554,183 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     setNotifications(prev => prev.map(n => (n.id === id ? { ...n, isRead: true } : n)));
   };
 
+  // Webhook SSE Listener: Listen to real-time incoming QRIS Webhook payments from server
+  useEffect(() => {
+    let eventSource: EventSource | null = null;
+    let fallbackPollInterval: any = null;
+    let lastSeenTimestamp = Date.now();
+
+    const handleIncomingWebhook = (payment: any) => {
+      if (!payment || !payment.amount) return;
+      const amount = Number(payment.amount);
+      if (amount <= 0) return;
+
+      // Find matching user by memberId or memberNumber (case & dash insensitive)
+      const cleanMemberNum = payment.memberNumber ? String(payment.memberNumber).toUpperCase().replace(/-/g, '') : '';
+      let targetUser = users.find(
+        u =>
+          (payment.memberId && u.id.toLowerCase() === payment.memberId.toLowerCase()) ||
+          (cleanMemberNum && u.memberNumber.toUpperCase().replace(/-/g, '') === cleanMemberNum)
+      );
+
+      // If not found by ID/number, check by sender name from NotivGo / bank notification
+      if (!targetUser && payment.sender) {
+        const sName = String(payment.sender).toLowerCase();
+        targetUser = users.find(
+          u =>
+            u.role === 'member' &&
+            (u.name.toLowerCase().includes(sName) || sName.includes(u.name.toLowerCase().split(' ')[0]))
+        );
+      }
+
+      // If still not matched, fallback to current logged-in member or first member
+      if (!targetUser && currentUser && currentUser.role === 'member') {
+        targetUser = currentUser;
+      } else if (!targetUser) {
+        targetUser = users.find(u => u.role === 'member') || users[0];
+      }
+
+      if (!targetUser) return;
+
+      const newBalance = targetUser.balance + amount;
+      const nowIso = payment.timestamp || new Date().toISOString();
+      const txId = payment.id || `tx-qris-${Date.now()}`;
+      const txCode = payment.referenceId || `QRIS-${Date.now().toString().slice(-8)}`;
+      const channel = payment.channelName || 'QRIS Instant Settlement';
+
+      const newTx: Transaction = {
+        id: txId,
+        code: txCode,
+        userId: targetUser.id,
+        userName: targetUser.name,
+        memberNumber: targetUser.memberNumber,
+        type: 'top_up',
+        title: `Top Up QRIS (Webhook): ${channel}`,
+        amount,
+        paymentMethod: 'e_wallet',
+        channelName: channel,
+        status: 'success',
+        timestamp: nowIso,
+        securityHash: generateTransactionHash(txId, targetUser.id, amount, nowIso),
+      };
+
+      // 1. Update frontend state
+      setUsers(prev => prev.map(u => (u.id === targetUser!.id ? { ...u, balance: newBalance } : u)));
+      setTransactions(prev => [newTx, ...prev]);
+
+      // 2. Trigger instant sparkling coin drop effect
+      triggerCoinDropEffect(amount);
+
+      // 3. Show instant Coin Alert Modal
+      setQrisCoinAlert({
+        amount,
+        userName: targetUser.name,
+        memberNumber: targetUser.memberNumber,
+        channelName: channel,
+        referenceId: txCode,
+        timestamp: nowIso,
+      });
+
+      // 4. Send persistent push notification
+      dispatchPushNotification({
+        userId: targetUser.id,
+        title: '🪙 Koin Diterima! Pembayaran QRIS Sukses',
+        message: `Koin saldo sebesar Rp ${amount.toLocaleString('id-ID')} berhasil masuk secara instan via Webhook (${channel}). Saldo Anda sekarang: Rp ${newBalance.toLocaleString('id-ID')}.`,
+        type: 'qris_coin_received',
+        data: { amount, newBalance, txCode },
+      });
+    };
+
+    try {
+      eventSource = new EventSource('/api/webhook/qris/stream');
+      eventSource.onmessage = (event) => {
+        try {
+          const data = JSON.parse(event.data);
+          if (data && data.amount) {
+            handleIncomingWebhook(data);
+          }
+        } catch {
+          // ignore keep-alive
+        }
+      };
+      eventSource.onerror = () => {
+        // SSE error, fallback will handle
+      };
+    } catch {
+      // EventSource not supported
+    }
+
+    // Polling fallback to guarantee reception across all environments
+    fallbackPollInterval = setInterval(async () => {
+      try {
+        const res = await fetch(`/api/webhook/qris/recent?since=${lastSeenTimestamp}`);
+        if (res.ok) {
+          const json = await res.json();
+          if (json.payments && Array.isArray(json.payments) && json.payments.length > 0) {
+            for (const p of json.payments) {
+              const pTime = new Date(p.timestamp).getTime();
+              if (pTime > lastSeenTimestamp) {
+                lastSeenTimestamp = pTime;
+                handleIncomingWebhook(p);
+              }
+            }
+          }
+        }
+      } catch {
+        // quiet fallback
+      }
+    }, 3000);
+
+    return () => {
+      if (eventSource) eventSource.close();
+      if (fallbackPollInterval) clearInterval(fallbackPollInterval);
+    };
+  }, [users, currentUser]);
+
+  // Client-side helper to simulate QRIS webhook payment by posting to /api/webhook/qris
+  const simulateQrisWebhookPayment = async (amount: number, targetUserId?: string): Promise<{ success: boolean; message: string }> => {
+    const targetMember = users.find(u => u.id === (targetUserId || currentUser?.id)) || currentUser || users[0];
+    const payload = {
+      amount,
+      memberId: targetMember?.id,
+      memberNumber: targetMember?.memberNumber,
+      customer_name: targetMember?.name,
+      channelName: 'QRIS Gopay / BCA / DANA Instant',
+      referenceId: `QRIS-WH-${Date.now().toString().slice(-6)}`,
+      transaction_status: 'PAID',
+      status: 'SUCCESS',
+    };
+
+    try {
+      const res = await fetch('/api/webhook/qris', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      });
+
+      if (res.ok) {
+        return {
+          success: true,
+          message: `Webhook QRIS berhasil dikirim ke server! Rp ${amount.toLocaleString('id-ID')} masuk ke akun ${targetMember?.name}.`,
+        };
+      } else {
+        // Fallback: If server endpoint isn't reached, handle directly on client
+        topUpBalance(targetMember.id, amount, 'e_wallet', 'QRIS Webhook Simulator (Offline Fallback)');
+        return {
+          success: true,
+          message: `Saldo diproses via fallback simulator: Rp ${amount.toLocaleString('id-ID')}`,
+        };
+      }
+    } catch {
+      // Direct local fallback
+      topUpBalance(targetMember.id, amount, 'e_wallet', 'QRIS Webhook Simulator');
+      return {
+        success: true,
+        message: `Saldo diproses via simulator: Rp ${amount.toLocaleString('id-ID')}`,
+      };
+    }
+  };
+
   const clearNotifications = () => {
     setNotifications([]);
   };
@@ -1470,6 +1779,10 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         deleteUser,
         manualAdjustBalance,
         refreshMemberQRToken,
+        qrisCoinAlert,
+        dismissCoinAlert,
+        triggerCoinDropEffect,
+        simulateQrisWebhookPayment,
         dismissToast,
         markNotificationAsRead,
         clearNotifications,

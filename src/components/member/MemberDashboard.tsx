@@ -29,7 +29,7 @@ import { SwimmingCourseSection } from './SwimmingCourseSection';
 import { MemberBannerCarousel } from './MemberBannerCarousel';
 
 export const MemberDashboard: React.FC = () => {
-  const { currentUser, transactions, settings, topUpBalance, refreshMemberQRToken } = useApp();
+  const { currentUser, transactions, settings, topUpBalance, refreshMemberQRToken, simulateQrisWebhookPayment } = useApp();
 
   const [activeSubTab, setActiveSubTab] = useState<'beranda' | 'riwayat' | 'kursus'>('beranda');
   const [showTopUpModal, setShowTopUpModal] = useState(false);
@@ -144,12 +144,20 @@ export const MemberDashboard: React.FC = () => {
     }
 
     setIsProcessingTopUp(true);
+
+    if (topUpMethod === 'ewallet') {
+      // Execute via QRIS Webhook endpoint
+      simulateQrisWebhookPayment(finalAmount, currentUser.id).then(() => {
+        setIsProcessingTopUp(false);
+        setShowTopUpModal(false);
+        setCustomAmount('');
+      });
+      return;
+    }
+
     setTimeout(() => {
-      let method: PaymentMethod = topUpMethod === 'bank' ? 'bank_transfer' : 'e_wallet';
-      let channel =
-        topUpMethod === 'bank'
-          ? settings.bankAccounts[selectedBank]?.bankName || 'Virtual Account'
-          : settings.eWallets[selectedEwallet]?.walletName || 'QRIS';
+      let method: PaymentMethod = 'bank_transfer';
+      let channel = settings.bankAccounts[selectedBank]?.bankName || 'Virtual Account';
 
       topUpBalance(currentUser.id, finalAmount, method, channel);
       setIsProcessingTopUp(false);
@@ -656,16 +664,21 @@ export const MemberDashboard: React.FC = () => {
                 type="button"
                 disabled={isProcessingTopUp || Boolean(customAmount && parseInt(customAmount, 10) < minTopUp)}
                 onClick={handleExecuteTopUp}
-                className="w-full py-3 px-4 rounded-xl bg-blue-600 hover:bg-blue-700 disabled:bg-slate-300 text-white font-bold text-sm shadow-sm shadow-blue-200 transition-all flex items-center justify-center gap-2 cursor-pointer disabled:cursor-not-allowed"
+                className="w-full py-3.5 px-4 rounded-xl bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700 disabled:from-slate-300 disabled:to-slate-300 text-white font-bold text-sm shadow-md shadow-blue-200 transition-all flex items-center justify-center gap-2 cursor-pointer disabled:cursor-not-allowed"
               >
                 {isProcessingTopUp ? (
                   <>
                     <RefreshCw className="w-4 h-4 animate-spin" />
-                    Memproses Saldo...
+                    Menunggu Respon Webhook QRIS...
+                  </>
+                ) : topUpMethod === 'ewallet' ? (
+                  <>
+                    <span>Kirim Webhook QRIS Berhasil (Simulasi Pembayaran)</span>
+                    <ChevronRight className="w-4 h-4" />
                   </>
                 ) : (
                   <>
-                    Konfirmasi Pembayaran (Simulasi Instan)
+                    <span>Konfirmasi Pembayaran Transfer Bank</span>
                     <ChevronRight className="w-4 h-4" />
                   </>
                 )}

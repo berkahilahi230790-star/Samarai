@@ -153,7 +153,7 @@ export interface PushNotification {
   userId?: string; // empty means broadcast to all
   title: string;
   message: string;
-  type: 'balance_update' | 'entry_success' | 'top_up' | 'refund' | 'schedule_alert' | 'system';
+  type: 'balance_update' | 'entry_success' | 'top_up' | 'refund' | 'schedule_alert' | 'system' | 'qris_coin_received';
   timestamp: string;
   isRead: boolean;
   data?: Record<string, any>;

@@ -148,8 +148,15 @@ export const Navbar: React.FC<NavbarProps> = ({ currentTab, setCurrentTab, onOpe
             <div className="w-10 h-10 rounded-xl bg-blue-600 shadow-lg shadow-blue-200/60 p-0.5 flex items-center justify-center overflow-hidden shrink-0 text-white">
               {settings.logoUrl ? (
                 <img
-                  src={settings.logoUrl}
+                  src={
+                    settings.logoUrl.includes('drive.google.com/file/d/')
+                      ? `https://drive.google.com/thumbnail?id=${settings.logoUrl.match(/\/file\/d\/([a-zA-Z0-9_-]+)/)?.[1] || ''}&sz=w1000`
+                      : settings.logoUrl.includes('drive.google.com') && settings.logoUrl.match(/[?&]id=([a-zA-Z0-9_-]+)/)
+                      ? `https://drive.google.com/thumbnail?id=${settings.logoUrl.match(/[?&]id=([a-zA-Z0-9_-]+)/)?.[1] || ''}&sz=w1000`
+                      : settings.logoUrl
+                  }
                   alt={settings.businessName}
+                  referrerPolicy="no-referrer"
                   className="w-full h-full object-cover rounded-[10px]"
                   onError={e => {
                     // Fallback to Waves icon if custom image fails

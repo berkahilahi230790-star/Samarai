@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { AppProvider, useApp } from './context/AppContext';
 import { Navbar } from './components/Navbar';
 import { NotificationToast } from './components/NotificationToast';
+import { QrisCoinReceivedModal } from './components/QrisCoinReceivedModal';
 import { AuthModal } from './components/AuthModal';
 import { MemberDashboard } from './components/member/MemberDashboard';
 import { CoachDashboard } from './components/coach/CoachDashboard';
@@ -27,6 +28,9 @@ const MainContent: React.FC = () => {
     <div className="min-h-screen bg-slate-50 flex flex-col font-sans selection:bg-blue-600 selection:text-white" style={{ backgroundColor: '#f8fafc' }}>
       {/* Real-time Push Notification Floating Banner */}
       <NotificationToast />
+
+      {/* Real-time QRIS Webhook Instant Coin Received Modal */}
+      <QrisCoinReceivedModal />
 
       {/* Navigation Header */}
       <Navbar

@@ -29,6 +29,7 @@ import { useApp } from '../../context/AppContext';
 import { verifyAndDecodeQR, generateMemberQRPayload } from '../../utils/encryption';
 import { Transaction } from '../../types';
 import { QRCameraScanner } from './QRCameraScanner';
+import { GateTopUpPage } from './GateTopUpPage';
 
 export const GateScanner: React.FC = () => {
   const {
@@ -36,7 +37,6 @@ export const GateScanner: React.FC = () => {
     settings,
     scanEntryTicket,
     cancelTransaction,
-    topUpBalance,
   } = useApp();
 
   const [ticketQuantity, setTicketQuantity] = useState<number>(1);
@@ -60,22 +60,14 @@ export const GateScanner: React.FC = () => {
   const [isProcessing, setIsProcessing] = useState(false);
   const [lastScannedUserId, setLastScannedUserId] = useState<string>('');
 
-  // Top Up Modal state - strictly based on active Admin settings
-  const minTopUpEmployee = typeof settings.minTopUpEmployee === 'number' && settings.minTopUpEmployee > 0
-    ? settings.minTopUpEmployee
-    : 100000;
+  // Sub-halaman Karyawan: 'scan' (Scan Pembayaran Tiket) atau 'topup' (Halaman Top Up Saldo Terpisah)
+  const [activeSubPage, setActiveSubPage] = useState<'scan' | 'topup'>('scan');
+  const [preselectedTopUpUserId, setPreselectedTopUpUserId] = useState<string>('');
 
-  const [isTopUpOpen, setIsTopUpOpen] = useState<boolean>(false);
-  const [topUpUserId, setTopUpUserId] = useState<string>('');
-  const [customTopUpAmount, setCustomTopUpAmount] = useState<string>(minTopUpEmployee.toString());
-  const [topUpPaymentMethod, setTopUpPaymentMethod] = useState<'cash' | 'e_wallet' | 'bank_transfer'>('cash');
-  const [topUpSuccessMsg, setTopUpSuccessMsg] = useState<string>('');
-
-  // Mode pemilihan member pada Top Up: 'qr_scan' (default) atau 'manual' (dropdown)
-  const [topUpSelectMode, setTopUpSelectMode] = useState<'qr_scan' | 'manual'>('qr_scan');
-  const [qrScanInput, setQrScanInput] = useState<string>('');
-  const [qrScanFeedback, setQrScanFeedback] = useState<string>('');
-  const [scannedViaQR, setScannedViaQR] = useState<boolean>(false);
+  const navigateToTopUp = (targetUserId?: string) => {
+    setPreselectedTopUpUserId(targetUserId || lastScannedUserId || '');
+    setActiveSubPage('topup');
+  };
 
   // State pencarian list nama member
   const [memberSearchQuery, setMemberSearchQuery] = useState<string>('');
@@ -91,110 +83,64 @@ export const GateScanner: React.FC = () => {
     );
   }, [memberCandidates, memberSearchQuery]);
 
-  const selectedTopUpMember = users.find(u => u.id === topUpUserId);
+  const renderNavigationTabs = () => (
+    <div className="bg-white rounded-2xl p-3 border border-slate-100 shadow-xs flex flex-col sm:flex-row sm:items-center justify-between gap-3 no-print">
+      <div className="flex items-center gap-3">
+        <div className="w-10 h-10 rounded-xl bg-blue-600 text-white flex items-center justify-center font-black text-sm shadow-xs">
+          SP
+        </div>
+        <div>
+          <div className="flex items-center gap-2">
+            <h2 className="text-xs font-black uppercase tracking-wider text-slate-800">
+              Portal Karyawan & Loket Gerbang
+            </h2>
+            <span
+              className={`text-[10px] font-bold px-2 py-0.5 rounded-full border ${
+                activeSubPage === 'scan'
+                  ? 'bg-blue-50 text-blue-700 border-blue-200'
+                  : 'bg-emerald-50 text-emerald-700 border-emerald-200'
+              }`}
+            >
+              {activeSubPage === 'scan' ? 'Mode Pintu Masuk' : 'Mode Loket Kasir'}
+            </span>
+          </div>
+          <p className="text-[11px] text-slate-500 mt-0.5">
+            Navigasi antara pemindaian tiket masuk dan halaman loket pengisian saldo member
+          </p>
+        </div>
+      </div>
 
-  const handleProcessScannedMemberQR = useCallback((rawQrString: string): boolean => {
-    const trimmed = rawQrString.trim();
-    if (!trimmed) return false;
+      {/* Navigasi Tab Jelas */}
+      <div className="flex bg-slate-100 p-1 rounded-xl gap-1">
+        <button
+          type="button"
+          onClick={() => setActiveSubPage('scan')}
+          className={`flex-1 sm:flex-none px-4 py-2 rounded-lg text-xs font-bold transition-all flex items-center justify-center gap-2 cursor-pointer ${
+            activeSubPage === 'scan'
+              ? 'bg-blue-600 text-white shadow-xs'
+              : 'text-slate-600 hover:text-slate-900 hover:bg-slate-200/60'
+          }`}
+        >
+          <ScanLine className="w-4 h-4" />
+          <span>Scan Pembayaran Tiket</span>
+        </button>
 
-    let memberId = '';
-    // 0. Cek format COACH badge
-    if (trimmed.startsWith('COACH:')) {
-      const parts = trimmed.split(':');
-      const foundCoach = users.find(u => u.id === parts[1] || u.memberNumber === parts[2]);
-      if (foundCoach) memberId = foundCoach.id;
-    }
-    // 1. Coba dekripsi payload terenkripsi QR Samarai Park
-    if (!memberId) {
-      const verification = verifyAndDecodeQR(trimmed);
-      if (verification.isValid && verification.payload) {
-        memberId = verification.payload.mId;
-      } else if (trimmed.toUpperCase().startsWith('SMP-')) {
-        const found = users.find(u => u.memberNumber.toUpperCase() === trimmed.toUpperCase());
-        if (found) memberId = found.id;
-      } else {
-        const found = users.find(
-          u => u.id.toLowerCase() === trimmed.toLowerCase() || u.memberNumber.toLowerCase() === trimmed.toLowerCase()
-        );
-        if (found) memberId = found.id;
-      }
-    }
-
-    if (memberId) {
-      const targetMember = users.find(u => u.id === memberId && (u.role === 'member' || u.role === 'coach'));
-      if (targetMember) {
-        setTopUpUserId(targetMember.id);
-        setScannedViaQR(true);
-        setQrScanFeedback(`✓ Berhasil terdeteksi: ${targetMember.name} (${targetMember.memberNumber})`);
-        setQrScanInput('');
-        return true;
-      }
-    }
-
-    setQrScanFeedback('⚠️ QR Code terbaca tetapi member tidak ditemukan dalam sistem.');
-    return false;
-  }, [users]);
-
-  const handleSimulateScanMember = (member: typeof memberCandidates[0]) => {
-    // Generate QR payload terenkripsi nyata persis seperti yang ada di layar HP member
-    const payload = generateMemberQRPayload(member.id, member.memberNumber, member.qrToken);
-    handleProcessScannedMemberQR(payload);
-  };
-
-  // Bersihkan input saat modal ditutup
-  useEffect(() => {
-    if (!isTopUpOpen) {
-      setQrScanFeedback('');
-      setQrScanInput('');
-    }
-  }, [isTopUpOpen]);
-
-  const handleOpenTopUp = (targetUserId?: string) => {
-    const defaultUser = targetUserId || lastScannedUserId || '';
-    setTopUpUserId(defaultUser);
-    setScannedViaQR(Boolean(targetUserId || lastScannedUserId));
-    setTopUpSelectMode(defaultUser ? 'qr_scan' : 'qr_scan');
-    setCustomTopUpAmount(minTopUpEmployee.toString());
-    setTopUpSuccessMsg('');
-    setQrScanFeedback(defaultUser ? 'Member terisi dari riwayat pemindaian gerbang.' : '');
-    setIsTopUpOpen(true);
-  };
-
-  const handleConfirmTopUp = (e: React.FormEvent) => {
-    e.preventDefault();
-    const finalAmount = parseInt(customTopUpAmount, 10);
-    if (!topUpUserId) {
-      alert('Pilih member terlebih dahulu.');
-      return;
-    }
-    if (isNaN(finalAmount) || finalAmount <= 0) {
-      alert('Nominal top up tidak valid.');
-      return;
-    }
-    if (finalAmount < minTopUpEmployee) {
-      alert(`Nominal top up minimal Rp ${minTopUpEmployee.toLocaleString('id-ID')} (berdasarkan pengaturan Min. Top Up Karyawan Aktif).`);
-      return;
-    }
-
-    const channelMap = {
-      cash: 'Tunai di Loket Gerbang',
-      e_wallet: 'QRIS Kasir Loket',
-      bank_transfer: 'Transfer Bank (VA)',
-    };
-
-    const res = topUpBalance(topUpUserId, finalAmount, topUpPaymentMethod, channelMap[topUpPaymentMethod]);
-    if (res.success) {
-      const targetUser = users.find(u => u.id === topUpUserId);
-      const newBal = (targetUser?.balance || 0) + finalAmount;
-      setTopUpSuccessMsg(`Top Up Rp ${finalAmount.toLocaleString('id-ID')} berhasil untuk ${targetUser?.name || 'Member'}! Saldo sekarang: Rp ${newBal.toLocaleString('id-ID')}`);
-      setTimeout(() => {
-        setIsTopUpOpen(false);
-        setTopUpSuccessMsg('');
-      }, 1500);
-    } else {
-      alert(res.message);
-    }
-  };
+        <button
+          type="button"
+          onClick={() => navigateToTopUp()}
+          className={`flex-1 sm:flex-none px-4 py-2 rounded-lg text-xs font-bold transition-all flex items-center justify-center gap-2 cursor-pointer ${
+            activeSubPage === 'topup'
+              ? 'bg-emerald-600 text-white shadow-xs'
+              : 'text-slate-600 hover:text-slate-900 hover:bg-slate-200/60'
+          }`}
+        >
+          <Wallet className="w-4 h-4" />
+          <span>Top Up Saldo Loket</span>
+          <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse hidden sm:inline-block" />
+        </button>
+      </div>
+    </div>
+  );
 
   const executeScan = (rawPayloadOrId: string) => {
     setIsProcessing(true);
@@ -228,14 +174,25 @@ export const GateScanner: React.FC = () => {
           });
           return;
         }
-      } else if (memberIdToUse.toUpperCase().startsWith('SMP-')) {
-        // Find user by memberNumber
-        const found = users.find(u => u.memberNumber.toUpperCase() === memberIdToUse.toUpperCase());
+      } else if (memberIdToUse.toUpperCase().startsWith('SMP')) {
+        // Find user by memberNumber (support both SMP20250811 and SMP-2025-0811)
+        const cleanQuery = memberIdToUse.toUpperCase().replace(/-/g, '');
+        const found = users.find(
+          u =>
+            u.memberNumber.toUpperCase() === memberIdToUse.toUpperCase() ||
+            u.memberNumber.toUpperCase().replace(/-/g, '') === cleanQuery
+        );
         if (found) memberIdToUse = found.id;
       } else {
-        // Direct ID or memberNumber fallback match
+        // Direct ID, memberNumber, or Name fallback match
+        const cleanQuery = memberIdToUse.toLowerCase().replace(/-/g, '');
         const found = users.find(
-          u => u.id.toLowerCase() === memberIdToUse.toLowerCase() || u.memberNumber.toLowerCase() === memberIdToUse.toLowerCase()
+          u =>
+            u.id.toLowerCase() === memberIdToUse.toLowerCase() ||
+            u.memberNumber.toLowerCase() === memberIdToUse.toLowerCase() ||
+            u.memberNumber.toLowerCase().replace(/-/g, '') === cleanQuery ||
+            u.name.toLowerCase() === memberIdToUse.toLowerCase() ||
+            u.name.toLowerCase().includes(memberIdToUse.toLowerCase())
         );
         if (found) memberIdToUse = found.id;
       }
@@ -304,8 +261,25 @@ export const GateScanner: React.FC = () => {
 
   const totalCost = ticketQuantity * settings.ticketPrice;
 
+  // Render Sub-halaman Top Up Saldo jika aktif
+  if (activeSubPage === 'topup') {
+    return (
+      <div className="space-y-6 animate-fade-in pb-12">
+        {renderNavigationTabs()}
+        <GateTopUpPage
+          initialMemberId={preselectedTopUpUserId}
+          onBackToScan={() => setActiveSubPage('scan')}
+        />
+      </div>
+    );
+  }
+
+  // Render Halaman Scan Pembayaran Tiket
   return (
     <div className="space-y-6 pb-12 animate-fade-in">
+      {/* Navigasi Utama Karyawan */}
+      {renderNavigationTabs()}
+
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
         
         {/* Left Column: Scanner Interface & Ticket Quantity Picker */}
@@ -315,27 +289,14 @@ export const GateScanner: React.FC = () => {
             
             {/* Step 1: Select Quantity */}
             <div>
-              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2.5 mb-3">
-                <div>
-                  <label className="text-[10px] font-black uppercase tracking-[0.2em] text-slate-400 flex items-center gap-1.5">
-                    <Users className="w-4 h-4 text-blue-600" />
-                    1. Pilih Jumlah Orang / Tiket
-                  </label>
-                  <span className="text-xs text-slate-500 font-medium mt-0.5 block">
-                    Tarif: <strong className="text-slate-900 font-bold">Rp {settings.ticketPrice.toLocaleString('id-ID')}</strong> / orang
-                  </span>
-                </div>
-
-                {/* Tombol Top Up Saldo Member */}
-                <button
-                  type="button"
-                  onClick={() => handleOpenTopUp()}
-                  className="inline-flex items-center justify-center gap-1.5 px-3.5 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-700 active:bg-emerald-800 text-white font-bold text-xs shadow-xs transition-all cursor-pointer shrink-0"
-                  title="Isi saldo akun member di loket gerbang"
-                >
-                  <Wallet className="w-3.5 h-3.5" />
-                  Top Up Saldo
-                </button>
+              <div className="mb-3">
+                <label className="text-[10px] font-black uppercase tracking-[0.2em] text-slate-400 flex items-center gap-1.5">
+                  <Users className="w-4 h-4 text-blue-600" />
+                  1. Pilih Jumlah Orang / Tiket
+                </label>
+                <span className="text-xs text-slate-500 font-medium mt-0.5 block">
+                  Tarif: <strong className="text-slate-900 font-bold">Rp {settings.ticketPrice.toLocaleString('id-ID')}</strong> / orang
+                </span>
               </div>
 
               <div className="space-y-3">
@@ -449,7 +410,7 @@ export const GateScanner: React.FC = () => {
               <form onSubmit={handleManualScanSubmit} className="flex gap-2 pt-1">
                 <input
                   type="text"
-                  placeholder="Atau gunakan barcode scanner fisik / ketik No. Member (cth: SMP-2025-0811)..."
+                  placeholder="Atau gunakan barcode scanner / ketik Nama atau No. Member (cth: Budi / SMP20250811)..."
                   value={manualInputCode}
                   onChange={e => setManualInputCode(e.target.value)}
                   className="flex-1 px-3.5 py-2.5 text-xs border border-slate-200 rounded-xl focus:ring-2 focus:ring-blue-500 focus:outline-hidden font-medium"
@@ -558,11 +519,12 @@ export const GateScanner: React.FC = () => {
 
                           <button
                             type="button"
-                            onClick={() => handleOpenTopUp(m.id)}
-                            className="px-2.5 py-1.5 rounded-xl bg-slate-50 hover:bg-emerald-50 text-slate-700 hover:text-emerald-700 border border-slate-200 hover:border-emerald-300 text-[11px] font-bold transition-all cursor-pointer"
+                            onClick={() => navigateToTopUp(m.id)}
+                            className="px-2.5 py-1.5 rounded-xl bg-slate-50 hover:bg-emerald-50 text-slate-700 hover:text-emerald-700 border border-slate-200 hover:border-emerald-300 text-[11px] font-bold transition-all cursor-pointer flex items-center gap-1"
                             title={`Top up saldo untuk ${m.name}`}
                           >
-                            + Top Up
+                            <Wallet className="w-3 h-3 text-emerald-600" />
+                            <span>+ Top Up</span>
                           </button>
                         </div>
                       </div>
@@ -671,11 +633,11 @@ export const GateScanner: React.FC = () => {
                   </p>
                   <button
                     type="button"
-                    onClick={() => handleOpenTopUp(lastScannedUserId || undefined)}
+                    onClick={() => navigateToTopUp(lastScannedUserId || undefined)}
                     className="w-full py-2.5 px-3 rounded-xl bg-emerald-600 hover:bg-emerald-700 active:bg-emerald-800 text-white text-xs font-bold shadow-xs flex items-center justify-center gap-1.5 transition-all cursor-pointer"
                   >
                     <Wallet className="w-4 h-4" />
-                    Top Up Saldo Member Sekarang
+                    Buka Halaman Top Up Saldo Member Ini →
                   </button>
                 </div>
               )}
@@ -703,356 +665,6 @@ export const GateScanner: React.FC = () => {
         </div>
 
       </div>
-
-      {/* MODAL: TOP UP SALDO MEMBER DI LOKET */}
-      {isTopUpOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-xs animate-fade-in no-print">
-          <div className="bg-white rounded-3xl max-w-md w-full shadow-2xl border border-slate-100 overflow-hidden text-slate-900 animate-scale-in">
-            {/* Header */}
-            <div className="bg-emerald-600 p-5 text-white flex items-center justify-between">
-              <div className="flex items-center gap-2.5">
-                <div className="w-9 h-9 rounded-xl bg-white/15 flex items-center justify-center text-white">
-                  <Wallet className="w-5 h-5" />
-                </div>
-                <div>
-                  <h3 className="text-base font-black tracking-tight leading-tight">Top Up Saldo Member</h3>
-                  <p className="text-xs text-emerald-100 font-medium">Pengisian saldo instan di pintu masuk / loket</p>
-                </div>
-              </div>
-              <button
-                type="button"
-                onClick={() => setIsTopUpOpen(false)}
-                className="w-8 h-8 rounded-full bg-white/15 hover:bg-white/25 flex items-center justify-center text-white transition-colors cursor-pointer"
-              >
-                ✕
-              </button>
-            </div>
-
-            {/* Modal Body */}
-            <div className="p-5 space-y-4 max-h-[80vh] overflow-y-auto">
-              {topUpSuccessMsg ? (
-                <div className="p-5 rounded-2xl bg-emerald-50 border border-emerald-200 text-center space-y-2.5 animate-fade-in">
-                  <CheckCircle2 className="w-12 h-12 text-emerald-600 mx-auto" />
-                  <h4 className="text-sm font-black text-emerald-900">Transaksi Berhasil!</h4>
-                  <p className="text-xs font-medium text-emerald-800 leading-relaxed">{topUpSuccessMsg}</p>
-                </div>
-              ) : (
-                <form onSubmit={handleConfirmTopUp} className="space-y-4">
-                  {/* 1. Pilih Member (Bisa dengan Scan QR Member atau Manual) */}
-                  <div className="space-y-2.5">
-                    <div className="flex items-center justify-between">
-                      <label className="block text-xs font-bold text-slate-800">
-                        1. Pilih Member Penerima Saldo
-                      </label>
-                      <div className="flex bg-slate-100 p-0.5 rounded-xl text-[11px] font-bold">
-                        <button
-                          type="button"
-                          onClick={() => {
-                            setTopUpSelectMode('qr_scan');
-                            setQrScanFeedback('');
-                          }}
-                          className={`px-2.5 py-1 rounded-lg transition-all flex items-center gap-1 cursor-pointer ${
-                            topUpSelectMode === 'qr_scan'
-                              ? 'bg-emerald-600 text-white shadow-xs'
-                              : 'text-slate-600 hover:text-slate-900'
-                          }`}
-                        >
-                          <QrCode className="w-3.5 h-3.5" />
-                          Scan QR Member
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => {
-                            setTopUpSelectMode('manual');
-                          }}
-                          className={`px-2.5 py-1 rounded-lg transition-all flex items-center gap-1 cursor-pointer ${
-                            topUpSelectMode === 'manual'
-                              ? 'bg-emerald-600 text-white shadow-xs'
-                              : 'text-slate-600 hover:text-slate-900'
-                          }`}
-                        >
-                          <Users className="w-3.5 h-3.5" />
-                          Pilih Daftar
-                        </button>
-                      </div>
-                    </div>
-
-                    {/* Jika Member Sudah Terpilih (baik dari Scan QR maupun Manual) */}
-                    {selectedTopUpMember && (
-                      <div className="p-3 bg-emerald-50/80 rounded-2xl border border-emerald-200 flex items-center justify-between gap-2 animate-fade-in shadow-xs">
-                        <div className="flex items-center gap-2.5 min-w-0">
-                          <div className="w-10 h-10 rounded-xl bg-emerald-600 text-white font-black text-sm flex items-center justify-center shrink-0 shadow-xs">
-                            {selectedTopUpMember.name.charAt(0)}
-                          </div>
-                          <div className="min-w-0">
-                            <div className="flex items-center gap-1.5 flex-wrap">
-                              <span className="font-black text-slate-900 text-xs truncate">
-                                {selectedTopUpMember.name}
-                              </span>
-                              <span className="text-[10px] font-bold px-1.5 py-0.5 rounded-md bg-emerald-100 text-emerald-800 border border-emerald-300">
-                                {scannedViaQR ? '✓ Terverifikasi via QR' : '✓ Terpilih'}
-                              </span>
-                            </div>
-                            <span className="text-[10px] text-blue-600 font-mono font-bold block">
-                              {selectedTopUpMember.memberNumber}
-                            </span>
-                          </div>
-                        </div>
-
-                        <div className="text-right shrink-0">
-                          <span className="text-[10px] text-slate-400 font-bold block uppercase tracking-wider">
-                            Saldo Saat Ini
-                          </span>
-                          <span className="font-black text-emerald-700 text-xs">
-                            Rp {selectedTopUpMember.balance.toLocaleString('id-ID')}
-                          </span>
-                        </div>
-                      </div>
-                    )}
-
-                    {/* MODE 1: SCAN QR MEMBER */}
-                    {topUpSelectMode === 'qr_scan' && (
-                      <div className="space-y-3 bg-slate-50 p-3.5 rounded-2xl border border-slate-200/80">
-                        {/* Area Pemindai Kamera Aktif dengan WebRTC & jsQR */}
-                        <QRCameraScanner
-                          onScan={code => handleProcessScannedMemberQR(code)}
-                          title="Pemindai Kamera Loket Top Up"
-                          subtitle="Arahkan kartu QR atau layar HP member ke kamera"
-                          accentColor="emerald"
-                          autoCloseOnSuccess={true}
-                          minHeight="min-h-[220px]"
-                        />
-
-                        {/* Input Pemindai Barcode Fisik / Paste Token QR / No. Member */}
-                        <div className="pt-1">
-                          <label className="text-[10px] font-bold text-slate-500 uppercase tracking-wider block mb-1">
-                            Atau Gunakan Barcode Scanner / Ketik No. Member:
-                          </label>
-                          <div className="flex gap-1.5">
-                            <input
-                              type="text"
-                              value={qrScanInput}
-                              onChange={e => setQrScanInput(e.target.value)}
-                              onKeyDown={e => {
-                                if (e.key === 'Enter') {
-                                  e.preventDefault();
-                                  handleProcessScannedMemberQR(qrScanInput);
-                                }
-                              }}
-                              placeholder="Ketik No. Member (cth: SMP-2025-0811) atau paste token..."
-                              className="flex-1 px-3 py-1.5 text-xs bg-white border border-slate-200 rounded-xl focus:ring-2 focus:ring-emerald-500 focus:outline-hidden font-medium"
-                            />
-                            <button
-                              type="button"
-                              onClick={() => handleProcessScannedMemberQR(qrScanInput)}
-                              disabled={!qrScanInput.trim()}
-                              className="px-3 py-1.5 bg-slate-800 hover:bg-slate-900 disabled:bg-slate-300 text-white font-bold text-xs rounded-xl transition-colors cursor-pointer shrink-0"
-                            >
-                              Cari
-                            </button>
-                          </div>
-                        </div>
-
-                        {/* Pesan Feedback Pemindaian */}
-                        {qrScanFeedback && (
-                          <div
-                            className={`p-2 rounded-xl text-[11px] font-bold flex items-center gap-1.5 ${
-                              qrScanFeedback.startsWith('✓')
-                                ? 'bg-emerald-100/70 text-emerald-900 border border-emerald-300'
-                                : 'bg-amber-50 text-amber-800 border border-amber-200'
-                            }`}
-                          >
-                            {qrScanFeedback.startsWith('✓') ? (
-                              <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
-                            ) : (
-                              <AlertCircle className="w-3.5 h-3.5 text-amber-600 shrink-0" />
-                            )}
-                            <span className="truncate">{qrScanFeedback}</span>
-                          </div>
-                        )}
-
-                        {/* Pilih Cepat Member Aktif */}
-                        <div className="pt-1 border-t border-slate-200/70">
-                          <span className="text-[10px] font-bold text-slate-500 block mb-1.5">
-                            Pilih Langsung dari List Member:
-                          </span>
-                          <div className="flex flex-wrap gap-1.5">
-                            {memberCandidates.slice(0, 4).map(m => (
-                              <button
-                                key={m.id}
-                                type="button"
-                                onClick={() => handleSimulateScanMember(m)}
-                                className={`px-2 py-1 rounded-lg text-[10px] font-bold border transition-all cursor-pointer flex items-center gap-1 ${
-                                  topUpUserId === m.id
-                                    ? 'bg-emerald-600 border-emerald-600 text-white shadow-xs'
-                                    : 'bg-white border-slate-200 hover:bg-emerald-50 hover:border-emerald-200 text-slate-700'
-                                }`}
-                                title={`Simulasi scan QR untuk ${m.name}`}
-                              >
-                                <QrCode className="w-3 h-3" />
-                                {m.name.split(' ')[0]} ({m.memberNumber.split('-')[2] || m.memberNumber})
-                              </button>
-                            ))}
-                          </div>
-                        </div>
-                      </div>
-                    )}
-
-                    {/* MODE 2: PILIH DARI DAFTAR DROPDOWN */}
-                    {topUpSelectMode === 'manual' && (
-                      <div className="space-y-1">
-                        <select
-                          value={topUpUserId}
-                          onChange={e => {
-                            setTopUpUserId(e.target.value);
-                            setScannedViaQR(false);
-                          }}
-                          required
-                          className="w-full px-3.5 py-2.5 text-xs font-bold bg-slate-50 border border-slate-200 rounded-xl focus:ring-2 focus:ring-emerald-500 focus:bg-white focus:outline-hidden"
-                        >
-                          <option value="">-- Pilih Member dari Daftar --</option>
-                          {memberCandidates.map(m => (
-                            <option key={m.id} value={m.id}>
-                              {m.name} ({m.memberNumber}) - Saldo: Rp {m.balance.toLocaleString('id-ID')}
-                            </option>
-                          ))}
-                        </select>
-                      </div>
-                    )}
-                  </div>
-
-                  {/* 2. Metode Pembayaran */}
-                  <div className="space-y-1.5">
-                    <label className="block text-xs font-bold text-slate-700">
-                      Metode Pembayaran di Loket
-                    </label>
-                    <div className="grid grid-cols-3 gap-2">
-                      <button
-                        type="button"
-                        onClick={() => setTopUpPaymentMethod('cash')}
-                        className={`p-2.5 rounded-xl border text-xs font-bold flex flex-col items-center gap-1 transition-all cursor-pointer ${
-                          topUpPaymentMethod === 'cash'
-                            ? 'bg-emerald-50 border-emerald-600 text-emerald-900 shadow-xs'
-                            : 'border-slate-200 hover:bg-slate-50 text-slate-600'
-                        }`}
-                      >
-                        <Banknote className="w-4 h-4 text-emerald-600" />
-                        Tunai / Cash
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => setTopUpPaymentMethod('e_wallet')}
-                        className={`p-2.5 rounded-xl border text-xs font-bold flex flex-col items-center gap-1 transition-all cursor-pointer ${
-                          topUpPaymentMethod === 'e_wallet'
-                            ? 'bg-emerald-50 border-emerald-600 text-emerald-900 shadow-xs'
-                            : 'border-slate-200 hover:bg-slate-50 text-slate-600'
-                        }`}
-                      >
-                        <QrCode className="w-4 h-4 text-blue-600" />
-                        QRIS Kasir
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => setTopUpPaymentMethod('bank_transfer')}
-                        className={`p-2.5 rounded-xl border text-xs font-bold flex flex-col items-center gap-1 transition-all cursor-pointer ${
-                          topUpPaymentMethod === 'bank_transfer'
-                            ? 'bg-emerald-50 border-emerald-600 text-emerald-900 shadow-xs'
-                            : 'border-slate-200 hover:bg-slate-50 text-slate-600'
-                        }`}
-                      >
-                        <CreditCard className="w-4 h-4 text-indigo-600" />
-                        Transfer Bank
-                      </button>
-                    </div>
-                  </div>
-
-                  {/* 3. Input Nominal Top Up */}
-                  <div className="space-y-1.5">
-                    <div className="flex items-center justify-between">
-                      <label className="block text-xs font-bold text-slate-700">
-                        Nominal Top Up
-                      </label>
-                      <span className="text-[10px] font-bold text-emerald-700 bg-emerald-50 border border-emerald-200 px-2 py-0.5 rounded-full">
-                        Min. Rp {minTopUpEmployee.toLocaleString('id-ID')}
-                      </span>
-                    </div>
-
-                    <div className="relative">
-                      <span className="absolute left-3.5 top-1/2 -translate-y-1/2 font-bold text-xs text-slate-400">
-                        Rp
-                      </span>
-                      <input
-                        type="number"
-                        min={minTopUpEmployee}
-                        step="1000"
-                        placeholder={`Masukkan nominal top up (Min. Rp ${minTopUpEmployee.toLocaleString('id-ID')})...`}
-                        value={customTopUpAmount}
-                        onChange={e => setCustomTopUpAmount(e.target.value)}
-                        required
-                        className={`w-full pl-10 pr-3.5 py-2.5 text-xs font-bold border rounded-xl focus:ring-2 focus:outline-hidden ${
-                          customTopUpAmount && parseInt(customTopUpAmount, 10) < minTopUpEmployee
-                            ? 'border-red-300 bg-red-50/40 text-red-900 focus:ring-red-500'
-                            : 'border-slate-200 focus:ring-emerald-500 bg-white'
-                        }`}
-                      />
-                    </div>
-                    {customTopUpAmount && parseInt(customTopUpAmount, 10) < minTopUpEmployee && (
-                      <p className="text-[11px] font-bold text-red-600 animate-fade-in">
-                        ⚠️ Nominal top up minimal Rp {minTopUpEmployee.toLocaleString('id-ID')} (berdasarkan pengaturan Min. Top Up Karyawan Aktif).
-                      </p>
-                    )}
-                  </div>
-
-                  {/* Kalkulasi Ringkasan */}
-                  <div className="p-3.5 bg-slate-50 rounded-2xl border border-slate-100 text-xs space-y-1.5">
-                    <div className="flex justify-between text-slate-500">
-                      <span>Saldo Saat Ini:</span>
-                      <span className="font-semibold text-slate-700">
-                        Rp {(selectedTopUpMember?.balance || 0).toLocaleString('id-ID')}
-                      </span>
-                    </div>
-                    <div className="flex justify-between text-slate-500">
-                      <span>Nominal Top Up:</span>
-                      <span className="font-bold text-emerald-600">
-                        +Rp {(parseInt(customTopUpAmount, 10) || 0).toLocaleString('id-ID')}
-                      </span>
-                    </div>
-                    <div className="flex justify-between font-black pt-1.5 border-t border-slate-200 text-slate-900">
-                      <span>Saldo Akhir:</span>
-                      <span className="text-emerald-700 font-black">
-                        Rp {((selectedTopUpMember?.balance || 0) + (parseInt(customTopUpAmount, 10) || 0)).toLocaleString('id-ID')}
-                      </span>
-                    </div>
-                  </div>
-
-                  {/* Tombol Aksi */}
-                  <div className="flex gap-2 pt-1">
-                    <button
-                      type="button"
-                      onClick={() => setIsTopUpOpen(false)}
-                      className="flex-1 py-2.5 rounded-xl border border-slate-200 font-bold text-xs text-slate-600 hover:bg-slate-50 transition-colors cursor-pointer"
-                    >
-                      Batal
-                    </button>
-                    <button
-                      type="submit"
-                      disabled={Boolean(customTopUpAmount && parseInt(customTopUpAmount, 10) < minTopUpEmployee)}
-                      className={`flex-2 py-2.5 rounded-xl font-bold text-xs text-white shadow-xs transition-all flex items-center justify-center gap-1.5 ${
-                        customTopUpAmount && parseInt(customTopUpAmount, 10) < minTopUpEmployee
-                          ? 'bg-slate-400 cursor-not-allowed'
-                          : 'bg-emerald-600 hover:bg-emerald-700 active:bg-emerald-800 cursor-pointer'
-                      }`}
-                    >
-                      <CheckCircle2 className="w-4 h-4" />
-                      Konfirmasi Top Up
-                    </button>
-                  </div>
-                </form>
-              )}
-            </div>
-          </div>
-        </div>
-      )}
 
     </div>
   );

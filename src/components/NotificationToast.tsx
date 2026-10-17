@@ -1,6 +1,6 @@
 import React from 'react';
 import { motion, AnimatePresence } from 'motion/react';
-import { Bell, CheckCircle2, AlertCircle, X, ArrowUpRight, ArrowDownLeft, ShieldCheck } from 'lucide-react';
+import { Bell, CheckCircle2, AlertCircle, X, ArrowUpRight, ArrowDownLeft, ShieldCheck, Coins } from 'lucide-react';
 import { useApp } from '../context/AppContext';
 
 export const NotificationToast: React.FC = () => {
@@ -10,6 +10,8 @@ export const NotificationToast: React.FC = () => {
 
   const getIcon = () => {
     switch (activeToast.type) {
+      case 'qris_coin_received':
+        return <Coins className="w-5 h-5 text-amber-500 animate-bounce" />;
       case 'entry_success':
         return <CheckCircle2 className="w-5 h-5 text-emerald-500" />;
       case 'top_up':
